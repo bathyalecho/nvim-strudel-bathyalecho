@@ -27,8 +27,8 @@
 
 ---@class StrudelPianorollConfig
 ---@field height number Height of the pianoroll window
----@field width number Character width of the display
 ---@field display_cycles number Number of cycles to show
+---@field mode 'auto'|'tracks'|'notes' Visualization mode
 
 ---@class StrudelConfig
 ---@field server StrudelServerConfig
@@ -72,8 +72,8 @@ M.defaults = {
   },
   pianoroll = {
     height = 10,              -- Height of pianoroll window
-    width = 64,               -- Character width of display
     display_cycles = 2,       -- Number of cycles to show
+    mode = 'auto',            -- 'auto', 'tracks', or 'notes' (braille)
   },
   picker = 'auto',
   auto_eval = false,

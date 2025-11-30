@@ -17,8 +17,10 @@ local M = {}
 ---@field cycle number Current cycle
 ---@field phase number Phase within cycle (0-1)
 ---@field display_cycles number Number of cycles to display
----@field width number Character width of the display
 ---@field ns_id number Namespace for extmarks
+---@field mode string Visualization mode: 'auto', 'tracks', 'notes', or 'drums'
+---@field notes table[]|nil Note events for braille mode
+---@field note_range table|nil {min, max} MIDI note range
 
 ---@type PianorollState
 local state = {
@@ -29,8 +31,10 @@ local state = {
   cycle = 0,
   phase = 0,
   display_cycles = 2,
-  width = 64,
   ns_id = vim.api.nvim_create_namespace('strudel_pianoroll'),
+  mode = 'auto', -- 'auto', 'tracks', 'notes', or 'drums'
+  notes = nil,
+  note_range = nil,
 }
 
 -- Unicode/ASCII characters for rendering
@@ -49,6 +53,206 @@ local CHARS = {
   tick = '┬',
   tick_bottom = '┴',
 }
+
+-- Braille character encoding
+-- Each braille char is a 2x4 grid of dots:
+--   1 4    (bits: 0x01, 0x08)
+--   2 5    (bits: 0x02, 0x10)
+--   3 6    (bits: 0x04, 0x20)
+--   7 8    (bits: 0x40, 0x80)
+-- Base character is U+2800 (empty braille)
+local BRAILLE_BASE = 0x2800
+local BRAILLE_DOTS = {
+  -- Left column (time position 0): rows 0-3 from top
+  { 0x01, 0x02, 0x04, 0x40 },
+  -- Right column (time position 1): rows 0-3 from top
+  { 0x08, 0x10, 0x20, 0x80 },
+}
+
+---Convert note grid to braille character
+---@param grid boolean[][] 2x4 grid [col][row] where col=1,2 and row=1-4
+---@return string Single braille character
+local function grid_to_braille(grid)
+  local code = BRAILLE_BASE
+  for col = 1, 2 do
+    for row = 1, 4 do
+      if grid[col] and grid[col][row] then
+        code = code + BRAILLE_DOTS[col][row]
+      end
+    end
+  end
+  -- Convert code point to UTF-8 string
+  if code < 0x80 then
+    return string.char(code)
+  elseif code < 0x800 then
+    return string.char(
+      0xC0 + math.floor(code / 64),
+      0x80 + (code % 64)
+    )
+  else
+    return string.char(
+      0xE0 + math.floor(code / 4096),
+      0x80 + math.floor((code % 4096) / 64),
+      0x80 + (code % 64)
+    )
+  end
+end
+
+---Convert MIDI note number to note name
+---@param midi number MIDI note number (0-127)
+---@return string Note name like "C4", "D#5"
+local function midi_to_note_name(midi)
+  local note_names = { 'C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B' }
+  local octave = math.floor(midi / 12) - 1
+  local note = note_names[(midi % 12) + 1]
+  return note .. octave
+end
+
+---Render notes as braille pianoroll
+---@param notes table[] Array of {start, end, active, note} events
+---@param note_range table {min, max} MIDI note range
+---@param width number Content width in characters
+---@param phase number Current phase (0-1)
+---@return string[] lines
+---@return table[] highlights
+local function render_braille_notes(notes, note_range, width, phase)
+  if not notes or #notes == 0 or not note_range then
+    return {}, {}
+  end
+
+  local min_note = note_range.min
+  local max_note = note_range.max
+  local note_count = max_note - min_note + 1
+
+  -- Each braille char represents 4 rows (notes) and 2 columns (time positions)
+  -- So we need ceil(note_count / 4) terminal lines
+  local num_rows = math.ceil(note_count / 4)
+  
+  -- Time resolution: each braille char = 2 time units
+  -- So effective time columns = width * 2
+  local time_cols = width * 2
+
+  -- Create a 2D grid: [note][time] = {on, active}
+  -- note is relative to min_note (0-indexed)
+  -- time is 0 to time_cols-1
+  local grid = {}
+  for n = 0, note_count - 1 do
+    grid[n] = {}
+  end
+
+  -- Fill grid from notes
+  for _, event in ipairs(notes) do
+    if event.note then
+      local note_idx = event.note - min_note
+      if note_idx >= 0 and note_idx < note_count then
+        local start_col = math.floor(event.start * time_cols)
+        local end_col = math.ceil(event['end'] * time_cols) - 1
+        for t = math.max(0, start_col), math.min(time_cols - 1, end_col) do
+          grid[note_idx][t] = { on = true, active = event.active }
+        end
+      end
+    end
+  end
+
+  local lines = {}
+  local highlights = {}
+
+  -- Render each row (4 notes per row)
+  for row = 0, num_rows - 1 do
+    local line_chars = {}
+    local row_highlights = {}
+
+    -- Notes for this row (bottom to top within the row for musical sense)
+    -- Row 0 = highest notes, so we iterate from top
+    local base_note = max_note - (row * 4)
+
+    for col = 0, width - 1 do
+      -- Each braille char covers 2 time positions
+      local t0 = col * 2
+      local t1 = col * 2 + 1
+
+      -- Build the 2x4 grid for this braille char
+      local braille_grid = { {}, {} }
+      local has_active = false
+      local has_any = false
+
+      for sub_row = 1, 4 do
+        local note_idx = (base_note - (sub_row - 1)) - min_note
+        if note_idx >= 0 and note_idx < note_count then
+          -- Left column (t0)
+          if grid[note_idx][t0] then
+            braille_grid[1][sub_row] = true
+            has_any = true
+            if grid[note_idx][t0].active then
+              has_active = true
+            end
+          end
+          -- Right column (t1)
+          if grid[note_idx][t1] then
+            braille_grid[2][sub_row] = true
+            has_any = true
+            if grid[note_idx][t1].active then
+              has_active = true
+            end
+          end
+        end
+      end
+
+      local char = grid_to_braille(braille_grid)
+      table.insert(line_chars, char)
+
+      -- Track highlights for this character
+      if has_any then
+        -- Calculate byte position (braille chars are 3 bytes in UTF-8)
+        local byte_start = (col) * 3
+        local byte_end = byte_start + 3
+        table.insert(row_highlights, {
+          col_start = byte_start,
+          col_end = byte_end,
+          hl_group = has_active and 'StrudelPianoActive' or 'StrudelPianoEvent',
+        })
+      end
+    end
+
+    -- Add playhead
+    local playhead_col = math.floor(phase * width / state.display_cycles)
+    if playhead_col >= 0 and playhead_col < width then
+      local byte_start = playhead_col * 3
+      local byte_end = byte_start + 3
+      table.insert(row_highlights, {
+        col_start = byte_start,
+        col_end = byte_end,
+        hl_group = 'StrudelPianoPlayhead',
+      })
+    end
+
+    table.insert(lines, table.concat(line_chars))
+    table.insert(highlights, row_highlights)
+  end
+
+  return lines, highlights
+end
+
+---Generate note labels for braille rows
+---@param note_range table {min, max}
+---@param num_rows number Number of braille rows
+---@return string[] labels
+local function generate_note_labels(note_range, num_rows)
+  local labels = {}
+  local max_note = note_range.max
+
+  for row = 0, num_rows - 1 do
+    local top_note = max_note - (row * 4)
+    local bottom_note = math.max(note_range.min, top_note - 3)
+    local label = midi_to_note_name(top_note)
+    if top_note ~= bottom_note then
+      label = midi_to_note_name(bottom_note) .. '-' .. midi_to_note_name(top_note)
+    end
+    table.insert(labels, label)
+  end
+
+  return labels
+end
 
 ---Create highlight groups for pianoroll
 local function setup_highlights()
@@ -87,6 +291,15 @@ local function setup_highlights()
     default = true,
     link = 'Comment',
   })
+end
+
+---Get the current window width
+---@return number
+local function get_window_width()
+  if state.winid and vim.api.nvim_win_is_valid(state.winid) then
+    return vim.api.nvim_win_get_width(state.winid)
+  end
+  return 64 -- fallback
 end
 
 ---Get the maximum track name length
@@ -158,7 +371,12 @@ local function render_track_line(track, width, phase)
   return table.concat(line), highlights
 end
 
----Render the visualization to the buffer
+-- Forward declarations for mutually-referencing functions
+local render_braille
+local render_tracks
+local render_drums
+
+---Render the visualization to the buffer (track mode, braille note mode, or drums mode)
 ---@param tracks table[]
 ---@param cycle number
 ---@param phase number
@@ -167,8 +385,304 @@ local function render(tracks, cycle, phase)
     return
   end
 
+  local width = get_window_width()
+  
+  -- Determine which mode to use
+  local use_notes = false
+  local use_drums = false
+  
+  if state.mode == 'notes' then
+    use_notes = state.notes and #state.notes > 0 and state.note_range
+  elseif state.mode == 'drums' then
+    -- Drums mode: group tracks as braille (4 per row)
+    use_drums = tracks and #tracks > 0
+  elseif state.mode == 'auto' then
+    -- Auto mode: use notes if we have note data, otherwise drums if we have tracks
+    if state.notes and #state.notes > 0 and state.note_range then
+      use_notes = true
+    elseif tracks and #tracks > 0 then
+      use_drums = true
+    end
+  end
+  -- else: 'tracks' mode, use original track display
+
+  if use_notes then
+    render_braille(cycle, phase, width)
+  elseif use_drums then
+    render_drums(tracks, cycle, phase, width)
+  else
+    render_tracks(tracks, cycle, phase, width)
+  end
+end
+
+---Render in braille note mode
+---@param cycle number
+---@param phase number
+---@param width number
+render_braille = function(cycle, phase, width)
+  local notes = state.notes
+  local note_range = state.note_range
+  
+  if not notes or #notes == 0 or not note_range then
+    -- Fall back to empty display
+    render_tracks({}, cycle, phase, width)
+    return
+  end
+
+  local note_count = note_range.max - note_range.min + 1
+  local num_rows = math.ceil(note_count / 4)
+  
+  -- Generate labels
+  local labels = generate_note_labels(note_range, num_rows)
+  local label_width = 0
+  for _, label in ipairs(labels) do
+    label_width = math.max(label_width, #label)
+  end
+  label_width = math.min(label_width, 10) -- cap at 10
+
+  local content_width = width - label_width - 3
+  if content_width < 8 then
+    content_width = 8
+  end
+
+  -- Render braille content
+  local braille_lines, braille_highlights = render_braille_notes(
+    notes, note_range, content_width, phase
+  )
+
+  local lines = {}
+  local all_highlights = {}
+
+  -- Header
+  local header_line = CHARS.corner_tl
+    .. string.rep(CHARS.border_h, label_width)
+    .. CHARS.tick
+    .. string.rep(CHARS.border_h, content_width)
+    .. CHARS.corner_tr
+  table.insert(lines, header_line)
+
+  -- Content lines
+  for i, content in ipairs(braille_lines) do
+    local label = labels[i] or ''
+    label = label:sub(1, label_width)
+    label = string.rep(' ', label_width - #label) .. label -- right-align
+
+    local line = CHARS.border_v .. label .. CHARS.border_v .. content .. CHARS.border_v
+    table.insert(lines, line)
+
+    -- Adjust highlight positions for the label offset
+    -- Label is label_width bytes, plus 2 border chars
+    local offset = 1 + label_width + 1
+    for _, hl in ipairs(braille_highlights[i] or {}) do
+      table.insert(all_highlights, {
+        line = i, -- 1-indexed for the content line (0 is header)
+        col_start = offset + hl.col_start,
+        col_end = offset + hl.col_end,
+        hl_group = hl.hl_group,
+      })
+    end
+
+    -- Add label highlight
+    table.insert(all_highlights, {
+      line = i,
+      col_start = 1,
+      col_end = 1 + label_width,
+      hl_group = 'StrudelPianoTrack',
+    })
+  end
+
+  -- Footer
+  local footer_line = CHARS.corner_bl
+    .. string.rep(CHARS.border_h, label_width)
+    .. CHARS.tick_bottom
+    .. string.rep(CHARS.border_h, content_width)
+    .. CHARS.corner_br
+  table.insert(lines, footer_line)
+
+  -- Update buffer
+  vim.api.nvim_set_option_value('modifiable', true, { buf = state.bufnr })
+  vim.api.nvim_buf_set_lines(state.bufnr, 0, -1, false, lines)
+  vim.api.nvim_set_option_value('modifiable', false, { buf = state.bufnr })
+
+  -- Clear old highlights
+  vim.api.nvim_buf_clear_namespace(state.bufnr, state.ns_id, 0, -1)
+
+  -- Apply highlights
+  for _, hl in ipairs(all_highlights) do
+    vim.api.nvim_buf_add_highlight(
+      state.bufnr,
+      state.ns_id,
+      hl.hl_group,
+      hl.line,
+      hl.col_start,
+      hl.col_end
+    )
+  end
+
+  -- Border highlights
+  for i = 0, #lines - 1 do
+    vim.api.nvim_buf_add_highlight(state.bufnr, state.ns_id, 'StrudelPianoBorder', i, 0, 1)
+    local line_len = #lines[i + 1]
+    vim.api.nvim_buf_add_highlight(state.bufnr, state.ns_id, 'StrudelPianoBorder', i, line_len - 1, line_len)
+  end
+  vim.api.nvim_buf_add_highlight(state.bufnr, state.ns_id, 'StrudelPianoBorder', 0, 0, -1)
+  vim.api.nvim_buf_add_highlight(state.bufnr, state.ns_id, 'StrudelPianoBorder', #lines - 1, 0, -1)
+end
+
+---Render in drums braille mode (group 4 tracks per braille row)
+---@param tracks table[]
+---@param cycle number
+---@param phase number
+---@param width number
+render_drums = function(tracks, cycle, phase, width)
+  local braille = require('strudel.braille')
+  
+  if not tracks or #tracks == 0 then
+    render_tracks({}, cycle, phase, width)
+    return
+  end
+  
+  local num_tracks = #tracks
+  local num_rows = math.ceil(num_tracks / 4)
+  
+  -- Collect track names for labels
+  local track_names = {}
+  for _, track in ipairs(tracks) do
+    table.insert(track_names, track.name)
+  end
+  
+  -- Generate labels
+  local labels = braille.generate_drum_labels(track_names, num_rows)
+  local label_width = 0
+  for _, label in ipairs(labels) do
+    label_width = math.max(label_width, #label)
+  end
+  label_width = math.min(label_width, 12) -- cap at 12
+
+  local content_width = width - label_width - 3
+  if content_width < 8 then
+    content_width = 8
+  end
+
+  local lines = {}
+  local all_highlights = {}
+
+  -- Header
+  local header_line = CHARS.corner_tl
+    .. string.rep(CHARS.border_h, label_width)
+    .. CHARS.tick
+    .. string.rep(CHARS.border_h, content_width)
+    .. CHARS.corner_tr
+  table.insert(lines, header_line)
+
+  -- Content lines (one per braille row = 4 tracks)
+  for row = 0, num_rows - 1 do
+    -- Which track indices belong to this row
+    local track_indices = {}
+    for i = 1, 4 do
+      local idx = row * 4 + i
+      if idx <= num_tracks then
+        table.insert(track_indices, idx)
+      end
+    end
+    
+    -- Render this row of tracks
+    local content, row_highlights = braille.render_drum_row(tracks, track_indices, content_width)
+    
+    local label = labels[row + 1] or ''
+    label = label:sub(1, label_width)
+    label = string.rep(' ', label_width - #label) .. label -- right-align
+
+    local line = CHARS.border_v .. label .. CHARS.border_v .. content .. CHARS.border_v
+    table.insert(lines, line)
+
+    -- Adjust highlight positions for the label offset
+    local offset = 1 + label_width + 1
+    for _, hl in ipairs(row_highlights) do
+      -- Each braille char is 3 bytes in UTF-8
+      local byte_start = hl.col * 3
+      local byte_end = byte_start + 3
+      table.insert(all_highlights, {
+        line = row + 1, -- +1 for header
+        col_start = offset + byte_start,
+        col_end = offset + byte_end,
+        hl_group = hl.active and 'StrudelPianoActive' or 'StrudelPianoEvent',
+      })
+    end
+
+    -- Add playhead highlight
+    local playhead_col = math.floor(phase * content_width / state.display_cycles)
+    if playhead_col >= 0 and playhead_col < content_width then
+      local byte_start = playhead_col * 3
+      local byte_end = byte_start + 3
+      table.insert(all_highlights, {
+        line = row + 1,
+        col_start = offset + byte_start,
+        col_end = offset + byte_end,
+        hl_group = 'StrudelPianoPlayhead',
+      })
+    end
+
+    -- Add label highlight
+    table.insert(all_highlights, {
+      line = row + 1,
+      col_start = 1,
+      col_end = 1 + label_width,
+      hl_group = 'StrudelPianoTrack',
+    })
+  end
+
+  -- Footer
+  local footer_line = CHARS.corner_bl
+    .. string.rep(CHARS.border_h, label_width)
+    .. CHARS.tick_bottom
+    .. string.rep(CHARS.border_h, content_width)
+    .. CHARS.corner_br
+  table.insert(lines, footer_line)
+
+  -- Update buffer
+  vim.api.nvim_set_option_value('modifiable', true, { buf = state.bufnr })
+  vim.api.nvim_buf_set_lines(state.bufnr, 0, -1, false, lines)
+  vim.api.nvim_set_option_value('modifiable', false, { buf = state.bufnr })
+
+  -- Clear old highlights
+  vim.api.nvim_buf_clear_namespace(state.bufnr, state.ns_id, 0, -1)
+
+  -- Apply highlights
+  for _, hl in ipairs(all_highlights) do
+    vim.api.nvim_buf_add_highlight(
+      state.bufnr,
+      state.ns_id,
+      hl.hl_group,
+      hl.line,
+      hl.col_start,
+      hl.col_end
+    )
+  end
+
+  -- Border highlights
+  for i = 0, #lines - 1 do
+    vim.api.nvim_buf_add_highlight(state.bufnr, state.ns_id, 'StrudelPianoBorder', i, 0, 1)
+    local line_len = #lines[i + 1]
+    vim.api.nvim_buf_add_highlight(state.bufnr, state.ns_id, 'StrudelPianoBorder', i, line_len - 1, line_len)
+  end
+  vim.api.nvim_buf_add_highlight(state.bufnr, state.ns_id, 'StrudelPianoBorder', 0, 0, -1)
+  vim.api.nvim_buf_add_highlight(state.bufnr, state.ns_id, 'StrudelPianoBorder', #lines - 1, 0, -1)
+end
+
+---Render in track mode (original behavior)
+---@param tracks table[]
+---@param cycle number
+---@param phase number
+---@param width number
+render_tracks = function(tracks, cycle, phase, width)
   local label_width = max_track_name_len(tracks)
-  local content_width = state.width - label_width - 3 -- -3 for " │ "
+  local content_width = width - label_width - 3 -- -3 for "│" + "│" + "│"
+  
+  -- Ensure minimum content width
+  if content_width < 16 then
+    content_width = 16
+  end
 
   local lines = {}
   local all_highlights = {}
@@ -222,10 +736,14 @@ local function render(tracks, cycle, phase)
 
   -- If no tracks, show a message
   if #tracks == 0 then
+    local msg = 'No pattern playing'
+    local inner_width = width - 2
+    local padding_left = math.floor((inner_width - #msg) / 2)
+    local padding_right = inner_width - #msg - padding_left
     lines = {
-      CHARS.corner_tl .. string.rep(CHARS.border_h, state.width - 2) .. CHARS.corner_tr,
-      CHARS.border_v .. string.rep(' ', 10) .. 'No pattern playing' .. string.rep(' ', state.width - 30) .. CHARS.border_v,
-      CHARS.corner_bl .. string.rep(CHARS.border_h, state.width - 2) .. CHARS.corner_br,
+      CHARS.corner_tl .. string.rep(CHARS.border_h, inner_width) .. CHARS.corner_tr,
+      CHARS.border_v .. string.rep(' ', padding_left) .. msg .. string.rep(' ', padding_right) .. CHARS.border_v,
+      CHARS.corner_bl .. string.rep(CHARS.border_h, inner_width) .. CHARS.corner_br,
     }
     all_highlights = {}
   end
@@ -266,6 +784,8 @@ local function on_visualization(msg)
   state.cycle = msg.cycle or 0
   state.phase = msg.phase or 0
   state.display_cycles = msg.displayCycles or 2
+  state.notes = msg.notes
+  state.note_range = msg.noteRange
 
   vim.schedule(function()
     render(state.tracks, state.cycle, state.phase)
@@ -326,10 +846,11 @@ function M.open()
   vim.api.nvim_set_option_value('swapfile', false, { buf = state.bufnr })
   vim.api.nvim_buf_set_name(state.bufnr, 'Strudel Pianoroll')
 
-  -- Calculate window dimensions
+  -- Load settings from config
   local cfg = config.get()
   local height = cfg.pianoroll and cfg.pianoroll.height or 10
-  state.width = cfg.pianoroll and cfg.pianoroll.width or 64
+  state.mode = cfg.pianoroll and cfg.pianoroll.mode or 'auto'
+  state.display_cycles = cfg.pianoroll and cfg.pianoroll.display_cycles or 2
 
   -- Create horizontal split at bottom
   local current_win = vim.api.nvim_get_current_win()
@@ -408,10 +929,21 @@ function M.set_display_cycles(cycles)
   state.display_cycles = math.max(1, math.min(8, cycles))
 end
 
----Set the display width
----@param width number
-function M.set_width(width)
-  state.width = math.max(32, math.min(200, width))
+---Set the visualization mode
+---@param mode string 'auto', 'tracks', 'notes', or 'drums'
+function M.set_mode(mode)
+  if mode == 'auto' or mode == 'tracks' or mode == 'notes' or mode == 'drums' then
+    state.mode = mode
+    utils.log('Pianoroll mode: ' .. mode)
+  else
+    utils.log('Invalid pianoroll mode: ' .. tostring(mode))
+  end
+end
+
+---Get the current visualization mode
+---@return string
+function M.get_mode()
+  return state.mode
 end
 
 return M

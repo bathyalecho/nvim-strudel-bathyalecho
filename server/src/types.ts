@@ -81,14 +81,18 @@ export interface BanksMessage {
   banks: string[];
 }
 
+/** Visualization event (single note/sound occurrence) */
+export interface VisualizationEvent {
+  start: number;  // 0-1 normalized position within display window
+  end: number;    // 0-1 normalized position
+  active: boolean; // Currently sounding
+  note?: number;  // MIDI note number (for melodic content)
+}
+
 /** Visualization track with events */
 export interface VisualizationTrack {
   name: string;
-  events: {
-    start: number;  // 0-1 normalized position within display window
-    end: number;    // 0-1 normalized position
-    active: boolean; // Currently sounding
-  }[];
+  events: VisualizationEvent[];
 }
 
 /** Visualization data for pianoroll/punchcard display */
@@ -98,6 +102,12 @@ export interface VisualizationMessage {
   phase: number;       // 0-1 position within current cycle
   tracks: VisualizationTrack[];
   displayCycles: number; // How many cycles are shown
+  // Note mode data (for braille pianoroll)
+  noteRange?: {
+    min: number;  // Lowest MIDI note
+    max: number;  // Highest MIDI note
+  };
+  notes?: VisualizationEvent[]; // All note events (flat, for note mode)
 }
 
 export type ServerMessage = ActiveMessage | ErrorMessage | StatusMessage | SamplesMessage | SoundsMessage | BanksMessage | VisualizationMessage;

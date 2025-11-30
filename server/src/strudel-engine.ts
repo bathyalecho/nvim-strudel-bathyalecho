@@ -4,7 +4,7 @@ import * as core from '@strudel/core';
 import * as mini from '@strudel/mini';
 import * as tonal from '@strudel/tonal';
 import { transpiler } from '@strudel/transpiler';
-import type { ActiveElement } from './types.js';
+import type { ActiveElement, VisualizationEvent } from './types.js';
 import { initOsc, sendHapToSuperDirt, isOscConnected, closeOsc } from './osc-output.js';
 
 // NOTE: Web Audio API polyfill is initialized in index.ts before this module is imported.
@@ -725,13 +725,16 @@ export class StrudelEngine {
   /**
    * Query the current pattern for visualization data
    * Returns haps grouped by track (sound/note name) for the display window
+   * Also includes note-level data for braille pianoroll mode
    * @param displayCycles Number of cycles to show in the visualization
    */
   queryVisualization(displayCycles = 2): {
     cycle: number;
     phase: number;
-    tracks: { name: string; events: { start: number; end: number; active: boolean }[] }[];
+    tracks: { name: string; events: VisualizationEvent[] }[];
     displayCycles: number;
+    noteRange?: { min: number; max: number };
+    notes?: VisualizationEvent[];
   } | null {
     if (!this.repl) return null;
 
@@ -751,20 +754,43 @@ export class StrudelEngine {
       const haps = pattern.queryArc(windowStart, windowEnd);
 
       // Group haps by track name (sound or note)
-      const trackMap = new Map<string, { start: number; end: number; active: boolean }[]>();
+      const trackMap = new Map<string, VisualizationEvent[]>();
+      
+      // Also collect all notes for braille mode
+      const allNotes: VisualizationEvent[] = [];
+      let minNote = Infinity;
+      let maxNote = -Infinity;
 
       for (const hap of haps) {
         // Get track name from the hap value
         let trackName = 'unknown';
+        let midiNote: number | undefined;
+        
         if (hap.value) {
           if (typeof hap.value === 'string') {
             trackName = hap.value;
+            // Try to parse as note name (e.g., "c4", "d#5")
+            midiNote = this.noteNameToMidi(hap.value);
           } else if (hap.value.s) {
             trackName = hap.value.s;
-          } else if (hap.value.note) {
-            trackName = String(hap.value.note);
-          } else if (hap.value.n !== undefined) {
-            trackName = `n${hap.value.n}`;
+          }
+          
+          // Extract note/pitch information
+          if (hap.value.note !== undefined) {
+            if (typeof hap.value.note === 'number') {
+              midiNote = hap.value.note;
+              trackName = this.midiToNoteName(hap.value.note);
+            } else if (typeof hap.value.note === 'string') {
+              midiNote = this.noteNameToMidi(hap.value.note);
+              trackName = hap.value.note;
+            }
+          }
+          if (hap.value.n !== undefined && midiNote === undefined) {
+            // 'n' is often a sample index, but can be a note
+            if (typeof hap.value.n === 'number' && hap.value.n >= 0 && hap.value.n <= 127) {
+              midiNote = hap.value.n;
+              trackName = `n${hap.value.n}`;
+            }
           }
         }
 
@@ -778,14 +804,24 @@ export class StrudelEngine {
         // Check if this hap is currently active
         const isActive = currentCycle >= hapStart && currentCycle < hapEnd;
 
-        if (!trackMap.has(trackName)) {
-          trackMap.set(trackName, []);
-        }
-        trackMap.get(trackName)!.push({
+        const event: VisualizationEvent = {
           start: Math.max(0, normalizedStart),
           end: Math.min(1, normalizedEnd),
           active: isActive,
-        });
+          note: midiNote,
+        };
+
+        if (!trackMap.has(trackName)) {
+          trackMap.set(trackName, []);
+        }
+        trackMap.get(trackName)!.push(event);
+        
+        // Track note range for braille mode
+        if (midiNote !== undefined) {
+          allNotes.push(event);
+          minNote = Math.min(minNote, midiNote);
+          maxNote = Math.max(maxNote, midiNote);
+        }
       }
 
       // Convert map to array of tracks, sorted by name
@@ -793,16 +829,68 @@ export class StrudelEngine {
         .map(([name, events]) => ({ name, events }))
         .sort((a, b) => a.name.localeCompare(b.name));
 
-      return {
+      const result: {
+        cycle: number;
+        phase: number;
+        tracks: { name: string; events: VisualizationEvent[] }[];
+        displayCycles: number;
+        noteRange?: { min: number; max: number };
+        notes?: VisualizationEvent[];
+      } = {
         cycle: currentCycle,
         phase,
         tracks,
         displayCycles,
       };
+      
+      // Include note data if we have any
+      if (allNotes.length > 0 && minNote !== Infinity) {
+        result.noteRange = { min: minNote, max: maxNote };
+        result.notes = allNotes;
+      }
+
+      return result;
     } catch (err) {
       console.error('[strudel-engine] Error querying visualization:', err);
       return null;
     }
+  }
+
+  /**
+   * Convert MIDI note number to note name (e.g., 60 -> "C4")
+   */
+  private midiToNoteName(midi: number): string {
+    const noteNames = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'];
+    const octave = Math.floor(midi / 12) - 1;
+    const note = noteNames[midi % 12];
+    return `${note}${octave}`;
+  }
+
+  /**
+   * Convert note name to MIDI number (e.g., "C4" -> 60, "c4" -> 60)
+   */
+  private noteNameToMidi(name: string): number | undefined {
+    const match = name.match(/^([a-gA-G])([#b]?)(-?\d+)?$/);
+    if (!match) return undefined;
+    
+    const noteMap: Record<string, number> = {
+      'c': 0, 'C': 0,
+      'd': 2, 'D': 2,
+      'e': 4, 'E': 4,
+      'f': 5, 'F': 5,
+      'g': 7, 'G': 7,
+      'a': 9, 'A': 9,
+      'b': 11, 'B': 11,
+    };
+    
+    let note = noteMap[match[1]];
+    if (note === undefined) return undefined;
+    
+    if (match[2] === '#') note += 1;
+    else if (match[2] === 'b') note -= 1;
+    
+    const octave = match[3] ? parseInt(match[3], 10) : 4;
+    return (octave + 1) * 12 + note;
   }
 
   /**

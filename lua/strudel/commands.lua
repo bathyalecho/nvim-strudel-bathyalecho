@@ -275,11 +275,33 @@ function M.setup()
   })
 
   -- :StrudelPianoroll - Toggle pianoroll visualization
-  vim.api.nvim_create_user_command('StrudelPianoroll', function()
+  vim.api.nvim_create_user_command('StrudelPianoroll', function(opts)
     local pianoroll = require('strudel.pianoroll')
-    pianoroll.toggle()
+    
+    if opts.args and opts.args ~= '' then
+      -- Mode argument provided: set mode
+      local mode = opts.args
+      if mode == 'toggle' then
+        pianoroll.toggle()
+      elseif mode == 'open' then
+        pianoroll.open()
+      elseif mode == 'close' then
+        pianoroll.close()
+      elseif mode == 'auto' or mode == 'tracks' or mode == 'notes' or mode == 'drums' then
+        pianoroll.set_mode(mode)
+        utils.log('Pianoroll mode: ' .. mode)
+      else
+        utils.warn('Unknown mode: ' .. mode .. ' (use: auto, tracks, notes, drums, toggle, open, close)')
+      end
+    else
+      pianoroll.toggle()
+    end
   end, {
-    desc = 'Toggle Strudel pianoroll visualization',
+    nargs = '?',
+    complete = function()
+      return { 'auto', 'tracks', 'notes', 'drums', 'toggle', 'open', 'close' }
+    end,
+    desc = 'Toggle Strudel pianoroll or set mode (auto/tracks/notes/drums)',
   })
 
   -- Setup filetype-based keymaps
