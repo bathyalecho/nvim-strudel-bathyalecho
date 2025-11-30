@@ -26,7 +26,7 @@ local function get_lsp_cmd()
   local plugin_root = utils.get_plugin_root()
   local lsp_path = plugin_root .. '/server/dist/lsp.js'
   if vim.fn.filereadable(lsp_path) == 1 then
-    return { 'node', lsp_path }
+    return { 'node', lsp_path, '--stdio' }
   end
 
   return nil

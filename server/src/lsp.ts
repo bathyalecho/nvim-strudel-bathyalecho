@@ -30,6 +30,10 @@ import {
 
 import { TextDocument } from 'vscode-languageserver-textdocument';
 
+// Import mini-notation parser for AST-based validation
+// @ts-ignore - @strudel/mini has no type declarations
+import { parse as parseMini, SyntaxError as MiniSyntaxError, getLeaves as getMiniLeaves } from '@strudel/mini';
+
 // Create connection using stdio
 const connection = createConnection(ProposedFeatures.all);
 const documents = new TextDocuments(TextDocument);
@@ -654,6 +658,88 @@ function findSimilar(word: string, candidates: string[], maxDistance = 2): strin
     .map(s => s.word);
 }
 
+/**
+ * Mini-notation parse result
+ */
+interface MiniParseResult {
+  success: boolean;
+  leaves?: Array<{
+    type_: string;
+    source_: string;
+    location_: {
+      start: { offset: number; line: number; column: number };
+      end: { offset: number; line: number; column: number };
+    };
+  }>;
+  error?: {
+    message: string;
+    location?: {
+      start: { offset: number; line: number; column: number };
+      end: { offset: number; line: number; column: number };
+    };
+    expected?: string[];
+    found?: string;
+  };
+}
+
+/**
+ * Parse mini-notation using @strudel/mini parser
+ * The parser expects the string WITH quotes, so we add them
+ */
+function parseMiniNotation(content: string): MiniParseResult {
+  // Wrap content in quotes for the parser (it expects the full quoted string)
+  const quotedContent = `"${content.replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"`;
+  
+  try {
+    // Use parse() directly to get the PEG.js error with location if it fails
+    parseMini(quotedContent);
+    
+    // If parse succeeded, get the leaves (atoms) for further analysis
+    const leaves = getMiniLeaves(quotedContent);
+    return { success: true, leaves };
+  } catch (e: any) {
+    // Check if it's a PEG.js SyntaxError with location
+    if (e && e.location) {
+      return {
+        success: false,
+        error: {
+          message: e.message,
+          location: e.location,
+          expected: e.expected?.map((exp: any) => {
+            if (exp.type === 'literal') return `'${exp.text}'`;
+            if (exp.description) return exp.description;
+            return String(exp);
+          }),
+          found: e.found,
+        },
+      };
+    }
+    
+    // Try to extract location from error message: "[mini] parse error at line X column Y:"
+    const locMatch = e.message?.match(/line (\d+)(?: column (\d+))?/);
+    if (locMatch) {
+      const line = parseInt(locMatch[1], 10);
+      const column = locMatch[2] ? parseInt(locMatch[2], 10) : 1;
+      return {
+        success: false,
+        error: {
+          message: e.message.replace(/^\[mini\] parse error at line \d+(?: column \d+)?:\s*/, ''),
+          location: {
+            start: { offset: 0, line, column },
+            end: { offset: 0, line, column: column + 1 },
+          },
+        },
+      };
+    }
+    
+    // Generic error
+    return {
+      success: false,
+      error: { message: e.message || 'Unknown parse error' },
+    };
+  }
+}
+
 // Store diagnostics with their data for code actions
 interface DiagnosticData {
   type: 'unknown_sample' | 'unbalanced_bracket' | 'unknown_function';
@@ -1104,7 +1190,8 @@ async function validateDocument(document: TextDocument): Promise<void> {
   
   while ((match = stringRegex.exec(text)) !== null) {
     const content = match[2];
-    const startOffset = match.index + 1; // Skip opening quote
+    const stringStartOffset = match.index; // Position of opening quote
+    const contentStartOffset = match.index + 1; // Skip opening quote
     
     // Skip empty strings
     if (!content.trim()) continue;
@@ -1112,67 +1199,85 @@ async function validateDocument(document: TextDocument): Promise<void> {
     // Skip strings that look like paths or URLs
     if (content.includes('/') && (content.startsWith('http') || content.startsWith('.') || content.startsWith('github:'))) continue;
     
-    // Check for unbalanced brackets
-    const brackets: Record<string, string> = { '[': ']', '{': '}', '(': ')', '<': '>' };
-    const stack: { char: string; pos: number }[] = [];
+    // Skip strings that are clearly not mini-notation (contain common code patterns)
+    if (content.includes('function') || content.includes('=>') || content.includes('return')) continue;
     
-    for (let i = 0; i < content.length; i++) {
-      const char = content[i];
-      if (Object.keys(brackets).includes(char)) {
-        stack.push({ char, pos: i });
-      } else if (Object.values(brackets).includes(char)) {
-        const expected = stack.pop();
-        if (!expected || brackets[expected.char] !== char) {
-          const pos = document.positionAt(startOffset + i);
-          const range = Range.create(pos, Position.create(pos.line, pos.character + 1));
-          const key = `${range.start.line}:${range.start.character}`;
-          
-          diagnostics.push({
-            severity: DiagnosticSeverity.Error,
-            range,
-            message: expected 
-              ? `Mismatched bracket: expected '${brackets[expected.char]}' but found '${char}'`
-              : `Unexpected closing bracket '${char}'`,
-            source: 'strudel',
-            code: 'unbalanced-bracket',
-          });
-          
-          docData.set(key, { type: 'unbalanced_bracket' });
-        }
+    // Parse using @strudel/mini for proper AST-based validation
+    const parseResult = parseMiniNotation(content);
+    
+    if (!parseResult.success && parseResult.error) {
+      // Report parser error with accurate location
+      const error = parseResult.error;
+      
+      // Calculate position in document
+      // Parser location is 1-indexed and includes the quote we added, so subtract 1 from column
+      let errorOffset: number;
+      if (error.location) {
+        // Parser offset includes the quote char we wrapped, so subtract 1
+        // But we want to point to the document position, so use contentStartOffset
+        errorOffset = contentStartOffset + Math.max(0, error.location.start.offset - 1);
+      } else {
+        errorOffset = contentStartOffset;
       }
-    }
-    
-    // Report unclosed brackets
-    for (const unclosed of stack) {
-      const pos = document.positionAt(startOffset + unclosed.pos);
-      const range = Range.create(pos, Position.create(pos.line, pos.character + 1));
+      
+      const pos = document.positionAt(errorOffset);
+      const endOffset = error.location 
+        ? contentStartOffset + Math.max(0, error.location.end.offset - 1)
+        : errorOffset + 1;
+      const endPos = document.positionAt(Math.min(endOffset, stringStartOffset + match[0].length - 1));
+      
+      const range = Range.create(pos, endPos);
+      const key = `${range.start.line}:${range.start.character}`;
+      
+      // Clean up the error message
+      let message = error.message;
+      if (error.expected && error.found !== undefined) {
+        const expectedStr = error.expected.slice(0, 5).join(', ');
+        const more = error.expected.length > 5 ? `, ... (${error.expected.length - 5} more)` : '';
+        message = `Syntax error: expected ${expectedStr}${more} but found ${error.found === null ? 'end of input' : `'${error.found}'`}`;
+      }
       
       diagnostics.push({
         severity: DiagnosticSeverity.Error,
         range,
-        message: `Unclosed bracket '${unclosed.char}'`,
+        message,
         source: 'strudel',
-        code: 'unclosed-bracket',
+        code: 'parse-error',
       });
+      
+      docData.set(key, { type: 'unbalanced_bracket' });
     }
     
-    // Check for unknown samples
-    const words = content.split(/[\s\[\]\{\}\(\)<>:*\/!?@~,|]+/).filter(w => w && !/^[0-9.-]+$/.test(w));
-    for (const word of words) {
-      // Skip if it looks like a note
-      if (/^[a-g][sb]?[0-9]?$/i.test(word)) continue;
-      // Skip if it's a known sample
-      if (samples.some(s => s.toLowerCase() === word.toLowerCase())) continue;
-      // Skip common words/operators
-      if (['x', 't', 'f', 'r', '-', '_'].includes(word.toLowerCase())) continue;
-      // Skip if it looks like a variable reference
-      if (/^[A-Z]/.test(word)) continue;
-      
-      // Find position of this word in content
-      const wordIndex = content.indexOf(word);
-      if (wordIndex !== -1) {
-        const pos = document.positionAt(startOffset + wordIndex);
-        const range = Range.create(pos, Position.create(pos.line, pos.character + word.length));
+    // If parsing succeeded, validate the leaves (atoms) for unknown samples
+    if (parseResult.success && parseResult.leaves) {
+      for (const leaf of parseResult.leaves) {
+        if (leaf.type_ !== 'atom') continue;
+        
+        const word = leaf.source_;
+        
+        // Skip if it looks like a note (with or without octave)
+        if (/^[a-g][sb]?[0-9]?$/i.test(word)) continue;
+        
+        // Skip numbers and rests
+        if (/^[0-9.-]+$/.test(word) || word === '~') continue;
+        
+        // Skip if it's a known sample
+        if (samples.some(s => s.toLowerCase() === word.toLowerCase())) continue;
+        
+        // Skip common mini-notation atoms
+        if (['x', 't', 'f', 'r', '-', '_'].includes(word.toLowerCase())) continue;
+        
+        // Skip if it looks like a variable reference
+        if (/^[A-Z]/.test(word)) continue;
+        
+        // Calculate position in document
+        // leaf.location_.start.offset is relative to the quoted string, subtract 1 for the quote we added
+        const wordOffset = contentStartOffset + Math.max(0, leaf.location_.start.offset - 1);
+        const wordEndOffset = contentStartOffset + Math.max(0, leaf.location_.end.offset - 1);
+        
+        const pos = document.positionAt(wordOffset);
+        const endPos = document.positionAt(wordEndOffset);
+        const range = Range.create(pos, endPos);
         const key = `${range.start.line}:${range.start.character}`;
         
         // Find similar samples for suggestion
@@ -1190,6 +1295,47 @@ async function validateDocument(document: TextDocument): Promise<void> {
         
         diagnostics.push(diagnostic);
         docData.set(key, { type: 'unknown_sample', word, suggestions });
+      }
+    } else if (!parseResult.success) {
+      // Fallback: if parsing failed, still try to identify unknown samples with simple regex
+      // This helps users even when there are syntax errors
+      const words = content.split(/[\s\[\]\{\}\(\)<>:*\/!?@~,|]+/).filter(w => w && !/^[0-9.-]+$/.test(w));
+      for (const word of words) {
+        // Skip if it looks like a note
+        if (/^[a-g][sb]?[0-9]?$/i.test(word)) continue;
+        // Skip if it's a known sample
+        if (samples.some(s => s.toLowerCase() === word.toLowerCase())) continue;
+        // Skip common words/operators
+        if (['x', 't', 'f', 'r', '-', '_'].includes(word.toLowerCase())) continue;
+        // Skip if it looks like a variable reference
+        if (/^[A-Z]/.test(word)) continue;
+        
+        // Find position of this word in content
+        const wordIndex = content.indexOf(word);
+        if (wordIndex !== -1) {
+          const pos = document.positionAt(contentStartOffset + wordIndex);
+          const range = Range.create(pos, Position.create(pos.line, pos.character + word.length));
+          const key = `${range.start.line}:${range.start.character}`;
+          
+          // Skip if we already reported this location
+          if (docData.has(key)) continue;
+          
+          // Find similar samples for suggestion
+          const suggestions = findSimilar(word, samples);
+          
+          const diagnostic: Diagnostic = {
+            severity: suggestions.length > 0 ? DiagnosticSeverity.Warning : DiagnosticSeverity.Hint,
+            range,
+            message: suggestions.length > 0
+              ? `Unknown sample '${word}'. Did you mean: ${suggestions.join(', ')}?`
+              : `Unknown sample '${word}' (may work if loaded dynamically)`,
+            source: 'strudel',
+            code: 'unknown-sample',
+          };
+          
+          diagnostics.push(diagnostic);
+          docData.set(key, { type: 'unknown_sample', word, suggestions });
+        }
       }
     }
   }
