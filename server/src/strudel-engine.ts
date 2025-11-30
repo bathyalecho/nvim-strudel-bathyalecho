@@ -240,9 +240,22 @@ const sampleLoaders: Promise<void>[] = [
       `${baseCDN}/tidal-drum-machines.json`,
       `${baseCDN}/tidal-drum-machines/machines/`
     );
-    // Also load the bank alias file for short names like "808" -> "RolandTR808"
-    await aliasBank(`${baseCDN}/tidal-drum-machines-alias.json`);
-    console.log('[strudel-engine] Loaded: tidal-drum-machines (with aliases)');
+    // Also load the bank alias file for short names like "Linn" -> "AkaiLinn"
+    // and track the alias short names for the picker
+    const aliasUrl = `${baseCDN}/tidal-drum-machines-alias.json`;
+    await aliasBank(aliasUrl);
+    // Fetch alias file to track short names for picker
+    try {
+      const resp = await fetch(aliasUrl);
+      const aliases = await resp.json() as Record<string, string>;
+      // aliases maps full name -> short name, we want the short names
+      for (const shortName of Object.values(aliases)) {
+        sampleBanks.add(shortName);
+      }
+      console.log(`[strudel-engine] Loaded: tidal-drum-machines (with ${Object.keys(aliases).length} aliases)`);
+    } catch (e) {
+      console.log('[strudel-engine] Loaded: tidal-drum-machines (aliases failed to load)');
+    }
   })(),
   
   // Mridangam samples
