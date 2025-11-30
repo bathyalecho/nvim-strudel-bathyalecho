@@ -222,6 +222,49 @@ The key challenge is mapping audio events back to source code. Approaches:
 2. **Runtime tracking**: Wrap pattern functions to record call sites
 3. **Hybrid**: Use both for maximum accuracy
 
+## Installation
+
+### Plugin Installation (Lazy.nvim)
+
+```lua
+{
+  'username/strudel.nvim',
+  dependencies = {
+    -- Optional: for picker functionality
+    'folke/snacks.nvim',        -- preferred
+    -- or 'nvim-telescope/telescope.nvim',
+    
+    -- Optional: for managed server installation
+    'williamboman/mason.nvim',
+  },
+  ft = { 'strudel', 'javascript', 'typescript' },
+  cmd = { 'StrudelPlay', 'StrudelEval', 'StrudelConnect' },
+  keys = {
+    { '<leader>sp', '<cmd>StrudelPlay<cr>', desc = 'Strudel Play' },
+    { '<leader>ss', '<cmd>StrudelStop<cr>', desc = 'Strudel Stop' },
+    { '<leader>se', '<cmd>StrudelEval<cr>', desc = 'Strudel Eval' },
+  },
+  opts = {
+    -- see Configuration Options below
+  },
+}
+```
+
+### Server Installation
+
+**Option 1: Mason (recommended)**
+```vim
+:MasonInstall strudel-server
+```
+
+**Option 2: Manual**
+```bash
+cd ~/.local/share/nvim/lazy/strudel.nvim/server
+npm install && npm run build
+```
+
+The plugin auto-detects the server location (Mason > manual > dev fallback).
+
 ## Configuration Options
 
 ```lua
