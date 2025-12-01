@@ -487,8 +487,8 @@ render_braille = function(cycle, phase, width)
     table.insert(lines, line)
 
     -- Adjust highlight positions for the label offset
-    -- Label is label_width bytes, plus 2 border chars
-    local offset = 1 + label_width + 1
+    -- border_v is 3 bytes, label is label_width bytes, another border_v is 3 bytes
+    local offset = 3 + label_width + 3
     for _, hl in ipairs(braille_highlights[i] or {}) do
       table.insert(all_highlights, {
         line = i, -- 1-indexed for the content line (0 is header)
@@ -498,11 +498,11 @@ render_braille = function(cycle, phase, width)
       })
     end
 
-    -- Add label highlight
+    -- Add label highlight (after first border_v which is 3 bytes)
     table.insert(all_highlights, {
       line = i,
-      col_start = 1,
-      col_end = 1 + label_width,
+      col_start = 3,
+      col_end = 3 + label_width,
       hl_group = 'StrudelPianoTrack',
     })
   end
@@ -535,11 +535,11 @@ render_braille = function(cycle, phase, width)
     )
   end
 
-  -- Border highlights
+  -- Border highlights (border chars are 3 bytes each in UTF-8)
   for i = 0, #lines - 1 do
-    vim.api.nvim_buf_add_highlight(state.bufnr, state.ns_id, 'StrudelPianoBorder', i, 0, 1)
+    vim.api.nvim_buf_add_highlight(state.bufnr, state.ns_id, 'StrudelPianoBorder', i, 0, 3)
     local line_len = #lines[i + 1]
-    vim.api.nvim_buf_add_highlight(state.bufnr, state.ns_id, 'StrudelPianoBorder', i, line_len - 1, line_len)
+    vim.api.nvim_buf_add_highlight(state.bufnr, state.ns_id, 'StrudelPianoBorder', i, line_len - 3, line_len)
   end
   vim.api.nvim_buf_add_highlight(state.bufnr, state.ns_id, 'StrudelPianoBorder', 0, 0, -1)
   vim.api.nvim_buf_add_highlight(state.bufnr, state.ns_id, 'StrudelPianoBorder', #lines - 1, 0, -1)
@@ -613,7 +613,8 @@ render_drums = function(tracks, cycle, phase, width)
     table.insert(lines, line)
 
     -- Adjust highlight positions for the label offset
-    local offset = 1 + label_width + 1
+    -- border_v is 3 bytes, label is label_width bytes, another border_v is 3 bytes
+    local offset = 3 + label_width + 3
     for _, hl in ipairs(row_highlights) do
       -- Each braille char is 3 bytes in UTF-8
       local byte_start = hl.col * 3
@@ -646,11 +647,11 @@ render_drums = function(tracks, cycle, phase, width)
       })
     end
 
-    -- Add label highlight
+    -- Add label highlight (after first border_v which is 3 bytes)
     table.insert(all_highlights, {
       line = row + 1,
-      col_start = 1,
-      col_end = 1 + label_width,
+      col_start = 3,
+      col_end = 3 + label_width,
       hl_group = 'StrudelPianoTrack',
     })
   end
@@ -683,11 +684,11 @@ render_drums = function(tracks, cycle, phase, width)
     )
   end
 
-  -- Border highlights
+  -- Border highlights (border chars are 3 bytes each in UTF-8)
   for i = 0, #lines - 1 do
-    vim.api.nvim_buf_add_highlight(state.bufnr, state.ns_id, 'StrudelPianoBorder', i, 0, 1)
+    vim.api.nvim_buf_add_highlight(state.bufnr, state.ns_id, 'StrudelPianoBorder', i, 0, 3)
     local line_len = #lines[i + 1]
-    vim.api.nvim_buf_add_highlight(state.bufnr, state.ns_id, 'StrudelPianoBorder', i, line_len - 1, line_len)
+    vim.api.nvim_buf_add_highlight(state.bufnr, state.ns_id, 'StrudelPianoBorder', i, line_len - 3, line_len)
   end
   vim.api.nvim_buf_add_highlight(state.bufnr, state.ns_id, 'StrudelPianoBorder', 0, 0, -1)
   vim.api.nvim_buf_add_highlight(state.bufnr, state.ns_id, 'StrudelPianoBorder', #lines - 1, 0, -1)
@@ -730,7 +731,8 @@ render_tracks = function(tracks, cycle, phase, width)
     table.insert(lines, line)
 
     -- Adjust highlight positions for the label offset
-    local offset = 1 + label_width + 1
+    -- border_v is 3 bytes, label is label_width bytes, another border_v is 3 bytes
+    local offset = 3 + label_width + 3
     for _, hl in ipairs(highlights) do
       table.insert(all_highlights, {
         line = i, -- 0-indexed later
@@ -740,11 +742,11 @@ render_tracks = function(tracks, cycle, phase, width)
       })
     end
 
-    -- Add label highlight
+    -- Add label highlight (after first border_v which is 3 bytes)
     table.insert(all_highlights, {
       line = i,
-      col_start = 1,
-      col_end = 1 + label_width,
+      col_start = 3,
+      col_end = 3 + label_width,
       hl_group = 'StrudelPianoTrack',
     })
   end
@@ -791,10 +793,11 @@ render_tracks = function(tracks, cycle, phase, width)
     )
   end
 
-  -- Border highlights
+  -- Border highlights (border chars are 3 bytes each in UTF-8)
   for i = 0, #lines - 1 do
-    vim.api.nvim_buf_add_highlight(state.bufnr, state.ns_id, 'StrudelPianoBorder', i, 0, 1)
-    vim.api.nvim_buf_add_highlight(state.bufnr, state.ns_id, 'StrudelPianoBorder', i, #lines[i + 1] - 1, #lines[i + 1])
+    vim.api.nvim_buf_add_highlight(state.bufnr, state.ns_id, 'StrudelPianoBorder', i, 0, 3)
+    local line_len = #lines[i + 1]
+    vim.api.nvim_buf_add_highlight(state.bufnr, state.ns_id, 'StrudelPianoBorder', i, line_len - 3, line_len)
   end
   vim.api.nvim_buf_add_highlight(state.bufnr, state.ns_id, 'StrudelPianoBorder', 0, 0, -1)
   vim.api.nvim_buf_add_highlight(state.bufnr, state.ns_id, 'StrudelPianoBorder', #lines - 1, 0, -1)
