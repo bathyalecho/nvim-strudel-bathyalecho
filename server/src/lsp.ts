@@ -4553,20 +4553,20 @@ const STRUDEL_FUNCTIONS: FunctionSignature[] = [
   },
   {
     name: 'bandf',
-    detail: 'Strudel function',
-    documentation: 'Strudel function. See strudel.cc for documentation.',
+    detail: 'Synonym for bpf',
+    documentation: 'Bandpass filter center frequency. Synonym for bpf.',
     signatures: [{
-      label: 'bandf(...)',
-      parameters: [],
+      label: 'bandf(frequency)',
+      parameters: [{ label: 'frequency', documentation: 'Center frequency in Hz' }],
     }],
   },
   {
     name: 'bandq',
-    detail: 'Strudel function',
-    documentation: 'Strudel function. See strudel.cc for documentation.',
+    detail: 'Synonym for bpq',
+    documentation: 'Bandpass filter Q-factor (resonance). Synonym for bpq.',
     signatures: [{
-      label: 'bandq(...)',
-      parameters: [],
+      label: 'bandq(q)',
+      parameters: [{ label: 'q', documentation: 'Q-factor value' }],
     }],
   },
   {
@@ -4823,11 +4823,11 @@ const STRUDEL_FUNCTIONS: FunctionSignature[] = [
   },
   {
     name: 'cutoff',
-    detail: 'Strudel function',
-    documentation: 'Strudel function. See strudel.cc for documentation.',
+    detail: 'Synonym for lpf',
+    documentation: 'Lowpass filter cutoff frequency. Synonym for lpf.',
     signatures: [{
-      label: 'cutoff(...)',
-      parameters: [],
+      label: 'cutoff(frequency)',
+      parameters: [{ label: 'frequency', documentation: 'Cutoff frequency in Hz (0-20000)' }],
     }],
   },
   {
@@ -5138,11 +5138,11 @@ const STRUDEL_FUNCTIONS: FunctionSignature[] = [
   },
   {
     name: 'hcutoff',
-    detail: 'Strudel function',
-    documentation: 'Strudel function. See strudel.cc for documentation.',
+    detail: 'Synonym for hpf',
+    documentation: 'Highpass filter cutoff frequency. Synonym for hpf.',
     signatures: [{
-      label: 'hcutoff(...)',
-      parameters: [],
+      label: 'hcutoff(frequency)',
+      parameters: [{ label: 'frequency', documentation: 'Cutoff frequency in Hz (0-20000)' }],
     }],
   },
   {
@@ -5156,11 +5156,11 @@ const STRUDEL_FUNCTIONS: FunctionSignature[] = [
   },
   {
     name: 'hresonance',
-    detail: 'Strudel function',
-    documentation: 'Strudel function. See strudel.cc for documentation.',
+    detail: 'Synonym for hpq',
+    documentation: 'Highpass filter resonance (Q-value). Synonym for hpq.',
     signatures: [{
-      label: 'hresonance(...)',
-      parameters: [],
+      label: 'hresonance(q)',
+      parameters: [{ label: 'q', documentation: 'Resonance factor (0-50)' }],
     }],
   },
   {
@@ -5516,11 +5516,11 @@ const STRUDEL_FUNCTIONS: FunctionSignature[] = [
   },
   {
     name: 'patt',
-    detail: 'Strudel function',
-    documentation: 'Strudel function. See strudel.cc for documentation.',
+    detail: 'Synonym for pattack',
+    documentation: 'Pitch envelope attack time in seconds. Synonym for pattack.',
     signatures: [{
-      label: 'patt(...)',
-      parameters: [],
+      label: 'patt(time)',
+      parameters: [{ label: 'time', documentation: 'Attack time in seconds' }],
     }],
   },
   {
@@ -5534,11 +5534,11 @@ const STRUDEL_FUNCTIONS: FunctionSignature[] = [
   },
   {
     name: 'pdec',
-    detail: 'Strudel function',
-    documentation: 'Strudel function. See strudel.cc for documentation.',
+    detail: 'Synonym for pdecay',
+    documentation: 'Pitch envelope decay time in seconds. Synonym for pdecay.',
     signatures: [{
-      label: 'pdec(...)',
-      parameters: [],
+      label: 'pdec(time)',
+      parameters: [{ label: 'time', documentation: 'Decay time in seconds' }],
     }],
   },
   {
@@ -5552,11 +5552,11 @@ const STRUDEL_FUNCTIONS: FunctionSignature[] = [
   },
   {
     name: 'phasdp',
-    detail: 'Strudel function',
-    documentation: 'Strudel function. See strudel.cc for documentation.',
+    detail: 'Synonym for phaserdepth',
+    documentation: 'Phaser effect depth (0-1). Synonym for phaserdepth.',
     signatures: [{
-      label: 'phasdp(...)',
-      parameters: [],
+      label: 'phasdp(depth)',
+      parameters: [{ label: 'depth', documentation: 'Depth value (0-1)' }],
     }],
   },
   {
@@ -5678,29 +5678,29 @@ const STRUDEL_FUNCTIONS: FunctionSignature[] = [
   },
   {
     name: 'prel',
-    detail: 'Strudel function',
-    documentation: 'Strudel function. See strudel.cc for documentation.',
+    detail: 'Synonym for prelease',
+    documentation: 'Pitch envelope release time in seconds. Synonym for prelease.',
     signatures: [{
-      label: 'prel(...)',
-      parameters: [],
+      label: 'prel(time)',
+      parameters: [{ label: 'time', documentation: 'Release time in seconds' }],
     }],
   },
   {
     name: 'psus',
-    detail: 'Strudel function',
-    documentation: 'Strudel function. See strudel.cc for documentation.',
+    detail: 'Pitch envelope sustain',
+    documentation: 'Pitch envelope sustain level.',
     signatures: [{
-      label: 'psus(...)',
-      parameters: [],
+      label: 'psus(level)',
+      parameters: [{ label: 'level', documentation: 'Sustain level (0-1)' }],
     }],
   },
   {
     name: 'psustain',
-    detail: 'Strudel function',
-    documentation: 'Strudel function. See strudel.cc for documentation.',
+    detail: 'Pitch envelope sustain',
+    documentation: 'Pitch envelope sustain level.',
     signatures: [{
-      label: 'psustain(...)',
-      parameters: [],
+      label: 'psustain(level)',
+      parameters: [{ label: 'level', documentation: 'Sustain level (0-1)' }],
     }],
   },
   {
@@ -5723,11 +5723,11 @@ const STRUDEL_FUNCTIONS: FunctionSignature[] = [
   },
   {
     name: 'rdim',
-    detail: 'Strudel function',
-    documentation: 'Strudel function. See strudel.cc for documentation.',
+    detail: 'Synonym for roomdim',
+    documentation: 'Reverb lowpass frequency at -60dB in Hz. Synonym for roomdim.',
     signatures: [{
-      label: 'rdim(...)',
-      parameters: [],
+      label: 'rdim(frequency)',
+      parameters: [{ label: 'frequency', documentation: 'Frequency in Hz (0-20000)' }],
     }],
   },
   {
@@ -5759,20 +5759,20 @@ const STRUDEL_FUNCTIONS: FunctionSignature[] = [
   },
   {
     name: 'resonance',
-    detail: 'Strudel function',
-    documentation: 'Strudel function. See strudel.cc for documentation.',
+    detail: 'Synonym for lpq',
+    documentation: 'Lowpass filter resonance (Q-value). Synonym for lpq.',
     signatures: [{
-      label: 'resonance(...)',
-      parameters: [],
+      label: 'resonance(q)',
+      parameters: [{ label: 'q', documentation: 'Resonance factor (0-50)' }],
     }],
   },
   {
     name: 'rfade',
-    detail: 'Strudel function',
-    documentation: 'Strudel function. See strudel.cc for documentation.',
+    detail: 'Synonym for roomfade',
+    documentation: 'Reverb fade time in seconds. Synonym for roomfade.',
     signatures: [{
-      label: 'rfade(...)',
-      parameters: [],
+      label: 'rfade(seconds)',
+      parameters: [{ label: 'seconds', documentation: 'Fade time in seconds' }],
     }],
   },
   {
@@ -5786,11 +5786,11 @@ const STRUDEL_FUNCTIONS: FunctionSignature[] = [
   },
   {
     name: 'rsize',
-    detail: 'Strudel function',
-    documentation: 'Strudel function. See strudel.cc for documentation.',
+    detail: 'Synonym for roomsize',
+    documentation: 'Reverb room size (0-10). Synonym for roomsize.',
     signatures: [{
-      label: 'rsize(...)',
-      parameters: [],
+      label: 'rsize(size)',
+      parameters: [{ label: 'size', documentation: 'Room size (0-10)' }],
     }],
   },
   {
