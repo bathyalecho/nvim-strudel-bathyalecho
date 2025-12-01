@@ -361,6 +361,7 @@ export class StrudelEngine {
   private repl: ReturnType<typeof repl> | null = null;
   private playing = false;  // True when not stopped (true for both play and pause)
   private paused = false;   // True when paused
+  private isPausing = false; // Flag to distinguish pause from stop in onToggle
   private cycle = 0;
   private cps = 1;
   private onActiveCallback: ((elements: ActiveElement[], cycle: number) => void) | null = null;
@@ -554,14 +555,21 @@ export class StrudelEngine {
       onToggle: (started: boolean) => {
         console.log(`[strudel-engine] onToggle: ${started ? 'Started' : 'Paused/Stopped'}`);
         
-        // Only update playing to true here - we manage false in stop()/hush()
-        // This is because REPL calls onToggle(false) for both pause and stop
         if (started) {
           this.playing = true;
           this.paused = false;
           this.startBroadcasting();
         } else {
-          // Don't set this.playing = false here, pause() and stop() handle that
+          // Check if this was a pause or stop
+          if (this.isPausing) {
+            this.paused = true;
+            // playing stays true
+            this.isPausing = false;
+          } else {
+            // It's a stop
+            this.playing = false;
+            this.paused = false;
+          }
           this.stopBroadcasting();
         }
       },
@@ -649,8 +657,6 @@ export class StrudelEngine {
       console.log('[strudel-engine] No pattern to play - evaluate code first');
       return false;
     }
-    this.playing = true;
-    this.paused = false;
     this.repl.start();
     return true;
   }
@@ -660,8 +666,7 @@ export class StrudelEngine {
    */
   pause(): void {
     if (!this.repl) return;
-    this.paused = true;
-    // playing stays true - we're still "in a session", just paused
+    this.isPausing = true; // Flag so onToggle knows this is a pause
     this.repl.pause();
   }
 
@@ -670,10 +675,7 @@ export class StrudelEngine {
    */
   stop(): void {
     if (!this.repl) return;
-    this.playing = false;
-    this.paused = false;
     this.repl.stop();
-    this.stopBroadcasting();
     this.cycle = 0;
   }
 
@@ -683,10 +685,7 @@ export class StrudelEngine {
    */
   hush(): void {
     if (!this.repl) return;
-    this.playing = false;
-    this.paused = false;
     this.repl.stop();
-    this.stopBroadcasting();
     this.cycle = 0;
     
     // Clear any pending audio by suspending and resuming the audio context
