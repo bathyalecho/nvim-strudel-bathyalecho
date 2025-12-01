@@ -3991,11 +3991,11 @@ const STRUDEL_FUNCTIONS: FunctionSignature[] = [
   },
   {
     name: 'id',
-    detail: 'Identity',
-    documentation: 'Shorthand for identity.',
+    detail: 'Identity function',
+    documentation: 'Returns its input unchanged. Functional programming utility.',
     signatures: [{
       label: 'id(value)',
-      parameters: [{ label: 'value', documentation: 'Identity value' }],
+      parameters: [{ label: 'value', documentation: 'Value to return' }],
     }],
   },
   {
@@ -4317,11 +4317,11 @@ const STRUDEL_FUNCTIONS: FunctionSignature[] = [
   // === EFFECTS ===
   {
     name: 'compose',
-    detail: 'Compose functions together',
-    documentation: 'Compose functions together.',
+    detail: 'Compose functions',
+    documentation: 'Composes functions right-to-left. Functional programming utility.',
     signatures: [{
-      label: 'compose(value)',
-      parameters: [{ label: 'value', documentation: 'Effect parameter value' }],
+      label: 'compose(...fns)',
+      parameters: [],
     }],
   },
   {
@@ -4751,11 +4751,11 @@ const STRUDEL_FUNCTIONS: FunctionSignature[] = [
   },
   {
     name: 'clamp',
-    detail: 'Strudel function',
-    documentation: 'Strudel function. See strudel.cc for documentation.',
+    detail: 'Clamp value',
+    documentation: 'Clamps a value between min and max. Standard JavaScript utility.',
     signatures: [{
-      label: 'clamp(...)',
-      parameters: [],
+      label: 'clamp(value, min, max)',
+      parameters: [{ label: 'value', documentation: 'Value to clamp' }, { label: 'min', documentation: 'Minimum value' }, { label: 'max', documentation: 'Maximum value' }],
     }],
   },
   {
@@ -4778,11 +4778,11 @@ const STRUDEL_FUNCTIONS: FunctionSignature[] = [
   },
   {
     name: 'constant',
-    detail: 'Strudel function',
-    documentation: 'Strudel function. See strudel.cc for documentation.',
+    detail: 'Constant function',
+    documentation: 'Returns a function that always returns the given value. Functional programming utility.',
     signatures: [{
-      label: 'constant(...)',
-      parameters: [],
+      label: 'constant(value)',
+      parameters: [{ label: 'value', documentation: 'Value to always return' }],
     }],
   },
   {
@@ -5003,11 +5003,11 @@ const STRUDEL_FUNCTIONS: FunctionSignature[] = [
   },
   {
     name: 'flatten',
-    detail: 'Strudel function',
-    documentation: 'Strudel function. See strudel.cc for documentation.',
+    detail: 'Flatten array',
+    documentation: 'Flattens a nested array by one level. Standard JavaScript utility.',
     signatures: [{
-      label: 'flatten(...)',
-      parameters: [],
+      label: 'flatten(array)',
+      parameters: [{ label: 'array', documentation: 'Array to flatten' }],
     }],
   },
   {
