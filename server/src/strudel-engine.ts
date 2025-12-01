@@ -552,10 +552,12 @@ export class StrudelEngine {
       },
       getTime,
       onToggle: (started: boolean) => {
-        this.playing = started;
-        console.log(`[strudel-engine] ${started ? 'Started' : 'Stopped'}`);
+        // Note: We don't set this.playing here because the REPL calls this
+        // for both pause and stop. We manage playing/paused state ourselves
+        // in play(), pause(), stop(), hush() methods.
+        console.log(`[strudel-engine] onToggle: ${started ? 'Started' : 'Paused/Stopped'}`);
         
-        // Start/stop broadcast timer
+        // Start/stop broadcast timer based on actual playback
         if (started) {
           this.startBroadcasting();
         } else {
