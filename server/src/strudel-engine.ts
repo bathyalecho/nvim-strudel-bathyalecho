@@ -362,6 +362,7 @@ export class StrudelEngine {
   private playing = false;  // True when not stopped (true for both play and pause)
   private paused = false;   // True when paused
   private isPausing = false; // Flag to distinguish pause from stop in onToggle
+  private pausedAtCycle = 0; // Cycle position when paused (for visualization)
   private cycle = 0;
   private cps = 1;
   private onActiveCallback: ((elements: ActiveElement[], cycle: number) => void) | null = null;
@@ -563,6 +564,9 @@ export class StrudelEngine {
           // Check if this was a pause or stop
           if (this.isPausing) {
             this.paused = true;
+            // Capture current cycle position for visualization while paused
+            const scheduler = (this.repl as any)?.scheduler;
+            this.pausedAtCycle = scheduler?.now?.() || this.cycle;
             // playing stays true
             // Keep broadcasting so pianoroll maintains playhead position
             this.isPausing = false;
@@ -788,7 +792,10 @@ export class StrudelEngine {
     if (!pattern) return null;
 
     const scheduler = (this.repl as any).scheduler;
-    const currentCycle = scheduler?.now?.() || 0;
+    // Use pausedAtCycle when paused, otherwise get current from scheduler
+    const currentCycle = this.paused 
+      ? this.pausedAtCycle 
+      : (scheduler?.now?.() || 0);
     const phase = currentCycle % 1;
 
     // Query window: 
