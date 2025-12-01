@@ -84,9 +84,7 @@ async function main() {
           const state = engine.getState();
           server.send(ws, {
             type: 'status',
-            playing: state.playing,
-            cycle: state.cycle,
-            cps: state.cps,
+            ...state,
           });
         }
         break;

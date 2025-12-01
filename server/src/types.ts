@@ -63,6 +63,7 @@ export interface ErrorMessage {
 export interface StatusMessage {
   type: 'status';
   playing: boolean;
+  stopped: boolean;  // True when fully stopped (not just paused)
   cycle: number;
   cps: number;
 }

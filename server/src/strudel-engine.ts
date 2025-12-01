@@ -360,6 +360,7 @@ console.log(`[strudel-engine] Available: ${loadedSamples.size} samples, ${sample
 export class StrudelEngine {
   private repl: ReturnType<typeof repl> | null = null;
   private playing = false;
+  private stopped = true;  // Explicitly track stopped state (vs paused)
   private cycle = 0;
   private cps = 1;
   private onActiveCallback: ((elements: ActiveElement[], cycle: number) => void) | null = null;
@@ -645,6 +646,7 @@ export class StrudelEngine {
       console.log('[strudel-engine] No pattern to play - evaluate code first');
       return false;
     }
+    this.stopped = false;
     this.repl.start();
     return true;
   }
@@ -654,6 +656,7 @@ export class StrudelEngine {
    */
   pause(): void {
     if (!this.repl) return;
+    // Note: stopped stays false on pause
     this.repl.pause();
   }
 
@@ -662,6 +665,7 @@ export class StrudelEngine {
    */
   stop(): void {
     if (!this.repl) return;
+    this.stopped = true;
     this.repl.stop();
     this.stopBroadcasting();
     this.cycle = 0;
@@ -673,6 +677,7 @@ export class StrudelEngine {
    */
   hush(): void {
     if (!this.repl) return;
+    this.stopped = true;
     this.repl.stop();
     this.stopBroadcasting();
     this.cycle = 0;
@@ -715,9 +720,10 @@ export class StrudelEngine {
   /**
    * Get current playback state
    */
-  getState(): { playing: boolean; cycle: number; cps: number } {
+  getState(): { playing: boolean; stopped: boolean; cycle: number; cps: number } {
     return {
       playing: this.playing,
+      stopped: this.stopped,
       cycle: this.repl?.scheduler?.now?.() || this.cycle,
       cps: this.repl?.scheduler?.cps || this.cps,
     };
