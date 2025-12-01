@@ -228,9 +228,11 @@ function M.setup()
 
   -- :StrudelStatus - Show connection/playback status
   vim.api.nvim_create_user_command('StrudelStatus', function()
+    local pianoroll = require('strudel.pianoroll')
     local connected = client.is_connected() and 'Connected' or 'Disconnected'
     local server = utils.is_server_running() and 'Running' or 'Not running'
-    utils.log('Connection: ' .. connected .. ' | Server: ' .. server)
+    local piano = pianoroll.is_enabled() and 'Enabled' or 'Disabled'
+    utils.log('Connection: ' .. connected .. ' | Server: ' .. server .. ' | Pianoroll: ' .. piano)
   end, {
     desc = 'Show Strudel status',
   })

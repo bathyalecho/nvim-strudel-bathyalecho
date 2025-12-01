@@ -27,6 +27,7 @@ const loadedSamples: Set<string> = new Set();    // All sample/sound names for s
 const replControls = {
   hush: () => { console.warn('[strudel] hush() called before engine initialized'); },
   setcps: (_cps: number) => { console.warn('[strudel] setcps() called before engine initialized'); },
+  requestVisualization: () => { console.warn('[strudel] visualization requested before engine initialized'); },
 };
 
 /**
@@ -151,6 +152,7 @@ await evalScope(
 // Register stub visualizer methods on Pattern.prototype
 // These are no-ops in Node.js since we can't render to a canvas
 // But we need them so code using visualizers doesn't crash
+// When called, they trigger a visualization request to the client
 const visualizerMethods = [
   'pianoroll',
   'punchcard', 
@@ -171,8 +173,11 @@ const PatternProto = Pattern.prototype as any;
 
 for (const method of visualizerMethods) {
   if (!PatternProto[method]) {
-    // Return 'this' to allow chaining
-    PatternProto[method] = function() { return this; };
+    // Request visualization and return 'this' to allow chaining
+    PatternProto[method] = function() { 
+      replControls.requestVisualization();
+      return this; 
+    };
   }
 }
 console.log('[strudel-engine] Visualizer stubs registered (pianoroll, punchcard, etc.)');
@@ -358,6 +363,7 @@ export class StrudelEngine {
   private cycle = 0;
   private cps = 1;
   private onActiveCallback: ((elements: ActiveElement[], cycle: number) => void) | null = null;
+  private onVisualizationRequestCallback: (() => void) | null = null;
   private activeElements: ActiveElement[] = [];
   private broadcastTimer: NodeJS.Timeout | null = null;
   private oscEnabled = false;
@@ -372,6 +378,7 @@ export class StrudelEngine {
     // Bind REPL control functions so they work from user code
     replControls.hush = () => this.hush();
     replControls.setcps = (cps: number) => this.setCps(cps);
+    replControls.requestVisualization = () => this.requestVisualization();
     
     console.log('[strudel-engine] Engine initialized');
     
@@ -687,6 +694,22 @@ export class StrudelEngine {
    */
   onActive(callback: (elements: ActiveElement[], cycle: number) => void): void {
     this.onActiveCallback = callback;
+  }
+
+  /**
+   * Register callback for visualization requests (when code uses pianoroll/punchcard)
+   */
+  onVisualizationRequest(callback: () => void): void {
+    this.onVisualizationRequestCallback = callback;
+  }
+
+  /**
+   * Trigger visualization request callback (called when pianoroll/punchcard is used in code)
+   */
+  requestVisualization(): void {
+    if (this.onVisualizationRequestCallback) {
+      this.onVisualizationRequestCallback();
+    }
   }
 
   /**

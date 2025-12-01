@@ -23,6 +23,9 @@ local M = {}
 ---@field note_range table|nil {min, max} MIDI note range
 ---@field smooth boolean Smooth scrolling (playhead at left edge)
 ---@field playhead_position number Playhead position in display window (0-1)
+---@field enabled boolean Whether pianoroll is enabled (user toggled on)
+---@field is_playing boolean Whether playback is active
+---@field callbacks_registered boolean Whether we've registered event callbacks
 
 ---@type PianorollState
 local state = {
@@ -39,6 +42,9 @@ local state = {
   note_range = nil,
   smooth = true, -- smooth scrolling by default
   playhead_position = 0, -- 0-1, where playhead is in display window
+  enabled = false, -- whether user has enabled pianoroll
+  is_playing = false, -- whether playback is active
+  callbacks_registered = false, -- whether event callbacks are registered
 }
 
 -- Unicode/ASCII characters for rendering
@@ -841,11 +847,53 @@ local function stop_timer()
   end
 end
 
----Create the pianoroll buffer and window
-function M.open()
+-- Forward declaration for show_window
+local show_window
+local hide_window
+
+---Handle status updates from server (play/pause/stop state)
+---@param msg table
+local function on_status(msg)
+  local was_playing = state.is_playing
+  state.is_playing = msg.playing or false
+  
+  -- If enabled and playback state changed, show/hide window
+  if state.enabled then
+    if state.is_playing and not was_playing then
+      -- Started playing - show window
+      vim.schedule(function()
+        show_window()
+      end)
+    elseif not state.is_playing and was_playing then
+      -- Stopped playing - hide window
+      vim.schedule(function()
+        hide_window()
+      end)
+    end
+  end
+end
+
+---Handle visualization request from server (when code uses pianoroll/punchcard)
+---@param msg table
+local function on_enable_visualization(msg)
+  -- Enable pianoroll when code requests visualization
+  if not state.enabled then
+    state.enabled = true
+    utils.log('Pianoroll enabled by pattern')
+    
+    -- If currently playing, show immediately
+    if state.is_playing then
+      vim.schedule(function()
+        show_window()
+      end)
+    end
+  end
+end
+
+---Actually create and show the pianoroll window
+show_window = function()
   -- Check if already open
   if state.winid and vim.api.nvim_win_is_valid(state.winid) then
-    vim.api.nvim_set_current_win(state.winid)
     return
   end
 
@@ -883,9 +931,6 @@ function M.open()
   -- Return to original window
   vim.api.nvim_set_current_win(current_win)
 
-  -- Register for visualization messages
-  client.on('visualization', on_visualization)
-
   -- Start animation timer
   start_timer()
 
@@ -903,11 +948,11 @@ function M.open()
     end,
   })
 
-  utils.log('Pianoroll opened')
+  utils.debug('Pianoroll window shown')
 end
 
----Close the pianoroll window
-function M.close()
+---Hide the pianoroll window (but keep enabled state)
+hide_window = function()
   stop_timer()
 
   if state.winid and vim.api.nvim_win_is_valid(state.winid) then
@@ -917,12 +962,35 @@ function M.close()
   state.winid = nil
   state.bufnr = nil
 
-  utils.log('Pianoroll closed')
+  utils.debug('Pianoroll window hidden')
+end
+
+---Create the pianoroll buffer and window
+function M.open()
+  state.enabled = true
+  
+  -- Ensure callbacks are registered
+  M.init()
+  
+  -- Only show window if currently playing
+  if state.is_playing then
+    show_window()
+    utils.log('Pianoroll enabled (playing)')
+  else
+    utils.log('Pianoroll enabled (will show when playing)')
+  end
+end
+
+---Close the pianoroll window
+function M.close()
+  state.enabled = false
+  hide_window()
+  utils.log('Pianoroll disabled')
 end
 
 ---Toggle the pianoroll window
 function M.toggle()
-  if state.winid and vim.api.nvim_win_is_valid(state.winid) then
+  if state.enabled then
     M.close()
   else
     M.open()
@@ -933,6 +1001,12 @@ end
 ---@return boolean
 function M.is_open()
   return state.winid ~= nil and vim.api.nvim_win_is_valid(state.winid)
+end
+
+---Check if pianoroll is enabled
+---@return boolean
+function M.is_enabled()
+  return state.enabled
 end
 
 ---Set the number of cycles to display
@@ -975,6 +1049,21 @@ end
 function M.toggle_smooth()
   state.smooth = not state.smooth
   utils.log('Pianoroll smooth scrolling: ' .. (state.smooth and 'on' or 'off'))
+end
+
+---Initialize pianoroll callbacks (called at plugin setup)
+---This ensures we receive visualization requests from patterns
+function M.init()
+  if state.callbacks_registered then
+    return
+  end
+  
+  client.on('visualization', on_visualization)
+  client.on('status', on_status)
+  client.on('enableVisualization', on_enable_visualization)
+  state.callbacks_registered = true
+  
+  utils.debug('Pianoroll callbacks registered')
 end
 
 return M

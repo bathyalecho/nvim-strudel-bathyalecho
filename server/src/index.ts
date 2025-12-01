@@ -61,6 +61,13 @@ async function main() {
     });
   });
 
+  // Forward visualization requests to all clients (when code uses pianoroll/punchcard)
+  engine.onVisualizationRequest(() => {
+    server.broadcast({
+      type: 'enableVisualization',
+    });
+  });
+
   // Handle client messages
   server.onMessage(async (msg, ws) => {
     console.log('[strudel-server] Received message:', msg.type);

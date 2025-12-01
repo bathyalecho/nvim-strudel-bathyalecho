@@ -54,6 +54,9 @@ function M.setup(opts)
   -- Setup LSP
   require('strudel.lsp').setup()
 
+  -- Initialize pianoroll (registers callbacks for auto-show behavior)
+  require('strudel.pianoroll').init()
+
   -- Store server command for later use
   M._server_cmd = get_server_cmd
 

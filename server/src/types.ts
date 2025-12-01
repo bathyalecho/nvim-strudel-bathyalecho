@@ -111,7 +111,12 @@ export interface VisualizationMessage {
   notes?: VisualizationEvent[]; // All note events (flat, for note mode)
 }
 
-export type ServerMessage = ActiveMessage | ErrorMessage | StatusMessage | SamplesMessage | SoundsMessage | BanksMessage | VisualizationMessage;
+/** Message to enable visualization (when pattern code calls pianoroll/punchcard) */
+export interface EnableVisualizationMessage {
+  type: 'enableVisualization';
+}
+
+export type ServerMessage = ActiveMessage | ErrorMessage | StatusMessage | SamplesMessage | SoundsMessage | BanksMessage | VisualizationMessage | EnableVisualizationMessage;
 
 /** Server configuration */
 export interface ServerConfig {
