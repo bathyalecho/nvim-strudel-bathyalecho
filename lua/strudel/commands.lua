@@ -313,12 +313,24 @@ function M.setup()
   -- Setup filetype-based keymaps
   setup_filetype_autocmds()
 
-  -- Setup BufWipeout handler to stop playback when strudel buffer is closed
+  -- Setup handlers to stop playback when strudel buffer is closed
   local wipeout_group = vim.api.nvim_create_augroup('StrudelBufWipeout', { clear = true })
+  
+  -- Helper to check if any window is showing an evaluated buffer
+  local function has_evaluated_buffer_window()
+    for _, win in ipairs(vim.api.nvim_list_wins()) do
+      local buf = vim.api.nvim_win_get_buf(win)
+      if evaluated_buffers[buf] then
+        return true
+      end
+    end
+    return false
+  end
+  
+  -- Stop when buffer is wiped
   vim.api.nvim_create_autocmd('BufWipeout', {
     group = wipeout_group,
     callback = function(args)
-      -- If this buffer was evaluated, remove it from tracking
       if evaluated_buffers[args.buf] then
         evaluated_buffers[args.buf] = nil
         
@@ -329,14 +341,28 @@ function M.setup()
           break
         end
         
-        -- If no evaluated buffers remain, stop playback
         if not has_remaining and client.is_connected() then
           client.stop()
           utils.debug('Last strudel buffer closed, stopping playback')
         end
       end
     end,
-    desc = 'Stop Strudel playback when buffer is closed',
+    desc = 'Stop Strudel playback when buffer is wiped',
+  })
+  
+  -- Stop when window is closed and no windows with evaluated buffers remain
+  vim.api.nvim_create_autocmd('WinClosed', {
+    group = wipeout_group,
+    callback = function(args)
+      -- Defer to let the window actually close first
+      vim.schedule(function()
+        if not has_evaluated_buffer_window() and client.is_connected() then
+          client.stop()
+          utils.debug('No strudel windows remain, stopping playback')
+        end
+      end)
+    end,
+    desc = 'Stop Strudel playback when no strudel windows remain',
   })
 
   utils.debug('Commands registered')
