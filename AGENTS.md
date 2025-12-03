@@ -354,6 +354,30 @@ This script:
 cd server && npm run build
 ```
 
+#### Testing with OSC/SuperDirt
+
+To test patterns with the OSC backend (sending to SuperDirt in SuperCollider):
+
+```bash
+cd server
+
+# Test with OSC output (auto-starts SuperCollider/SuperDirt)
+node test-pattern.mjs --osc path/to/pattern.strudel 10
+
+# Test with OSC and verbose logging (shows all OSC messages sent)
+node test-pattern.mjs --osc --verbose path/to/pattern.strudel 10
+
+# Inline pattern with OSC
+echo 's("bd sd hh sd")' | node test-pattern.mjs --osc --verbose - 5
+```
+
+The `--verbose` flag enables detailed OSC message logging, showing:
+- Sample name (`s`), sample number (`n`)
+- Speed, note, gain values
+- Tremolo parameters if present
+- Envelope parameters (attack, release, sustain)
+- Soundfont-specific parameters (sfAttack, sfRelease, sfSustain)
+
 #### Unit Tests
 - Lua tests: Use plenary.nvim test harness
 - TypeScript tests: Use vitest
