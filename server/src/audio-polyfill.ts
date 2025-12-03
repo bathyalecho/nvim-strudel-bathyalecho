@@ -22,6 +22,116 @@ import { initWorkletPolyfill } from './worklet-polyfill.js';
 // Store whether we've initialized
 let initialized = false;
 
+// Track scheduled worklet disconnects for cleanup on hush
+const scheduledDisconnects = new Map<any, NodeJS.Timeout>();
+
+// Track all active worklet nodes with their end times for statistics
+interface TrackedNode {
+  node: any;
+  name: string;
+  endTime: number;
+  createdAt: number;
+}
+const activeWorkletNodes = new Map<any, TrackedNode>();
+
+/**
+ * Get statistics about active audio worklet nodes
+ */
+export function getWorkletStats(): {
+  total: number;
+  pending: number;  // Nodes waiting to be disconnected
+  byType: Record<string, number>;
+} {
+  const now = Date.now();
+  const byType: Record<string, number> = {};
+  let pending = 0;
+  
+  for (const [node, info] of activeWorkletNodes) {
+    byType[info.name] = (byType[info.name] || 0) + 1;
+    if (scheduledDisconnects.has(node)) {
+      pending++;
+    }
+  }
+  
+  return {
+    total: activeWorkletNodes.size,
+    pending,
+    byType,
+  };
+}
+
+/**
+ * Get count of active nodes that haven't finished yet
+ * @param ctx AudioContext to check against
+ */
+export function getActiveNodeCount(ctx?: any): number {
+  if (!ctx) return activeWorkletNodes.size;
+  
+  const currentTime = ctx.currentTime;
+  let active = 0;
+  
+  for (const [_, info] of activeWorkletNodes) {
+    if (info.endTime > currentTime) {
+      active++;
+    }
+  }
+  
+  return active;
+}
+
+/**
+ * Wait for all tracked worklet nodes to finish (or timeout)
+ * This is useful for glitch-free context transitions
+ * @param ctx AudioContext to check against
+ * @param maxWaitMs Maximum time to wait in milliseconds (default: 5000)
+ * @returns Promise that resolves when all nodes are done or timeout reached
+ */
+export async function waitForNodesToFinish(ctx: any, maxWaitMs = 5000): Promise<{ waited: number; remaining: number }> {
+  const startTime = Date.now();
+  
+  // Find the latest end time among all tracked nodes
+  let latestEnd = 0;
+  const currentTime = ctx.currentTime;
+  
+  for (const [_, info] of activeWorkletNodes) {
+    if (info.endTime > currentTime) {
+      latestEnd = Math.max(latestEnd, info.endTime);
+    }
+  }
+  
+  if (latestEnd <= currentTime) {
+    // All nodes already finished
+    return { waited: 0, remaining: 0 };
+  }
+  
+  // Calculate how long to wait (audio time to real time, plus buffer)
+  const waitTimeMs = Math.min((latestEnd - currentTime) * 1000 + 200, maxWaitMs);
+  
+  await new Promise(resolve => setTimeout(resolve, waitTimeMs));
+  
+  const remaining = getActiveNodeCount(ctx);
+  return { 
+    waited: Date.now() - startTime, 
+    remaining 
+  };
+}
+
+/**
+ * Cancel all scheduled worklet disconnects (for hush/stop)
+ */
+export function cancelScheduledDisconnects(): void {
+  for (const [node, timeout] of scheduledDisconnects) {
+    clearTimeout(timeout);
+    try {
+      node.disconnect();
+    } catch {
+      // Already disconnected
+    }
+  }
+  scheduledDisconnects.clear();
+  activeWorkletNodes.clear();
+}
+
 /**
  * Initialize the Web Audio API polyfill for Node.js
  * This adds AudioContext and related classes to globalThis,
@@ -223,6 +333,63 @@ export function initAudioPolyfill(): void {
 
   // Initialize AudioWorklet polyfill for processors like shape, crush, etc.
   initWorkletPolyfill();
+
+  // Wrap AudioWorkletNode to auto-disconnect nodes with 'end' parameter
+  // This fixes the memory leak in superdough where LFO nodes for tremolo
+  // are created but never disconnected (they're not added to the audioNodes array)
+  // See: https://github.com/tidalcycles/strudel/issues/XXX (to be reported)
+  //
+  // The challenge: superdough's getWorklet() creates the node first, THEN sets parameters.
+  // So we can't read 'end' at construction time. Instead, we defer the check using queueMicrotask.
+  const OriginalAudioWorkletNode = (globalThis as any).AudioWorkletNode;
+  if (OriginalAudioWorkletNode) {
+    (globalThis as any).AudioWorkletNode = class AudioWorkletNodeWrapper extends OriginalAudioWorkletNode {
+      constructor(context: AudioContext, name: string, options?: AudioWorkletNodeOptions) {
+        super(context, name, options);
+        
+        // Check if this worklet has an 'end' parameter (like LFOProcessor)
+        const endParam = this.parameters.get('end');
+        if (endParam) {
+          const node = this;
+          const ctx = context;
+          const nodeName = name;
+          const createdAt = Date.now();
+          
+          // Defer the check to allow superdough's getWorklet() to set the parameters
+          queueMicrotask(() => {
+            const endTime = endParam.value;
+            const currentTime = ctx.currentTime;
+            
+            // Track this node
+            activeWorkletNodes.set(node, {
+              node,
+              name: nodeName,
+              endTime,
+              createdAt,
+            });
+            
+            if (endTime > 0 && endTime > currentTime) {
+              // Schedule disconnect slightly after end time (add 100ms buffer for processing)
+              const delayMs = Math.max(0, (endTime - currentTime) * 1000 + 100);
+              
+              const timeout = setTimeout(() => {
+                try {
+                  node.disconnect();
+                } catch {
+                  // Already disconnected
+                }
+                scheduledDisconnects.delete(node);
+                activeWorkletNodes.delete(node);
+              }, delayMs);
+              
+              scheduledDisconnects.set(node, timeout);
+            }
+          });
+        }
+      }
+    };
+    console.log('[audio-polyfill] AudioWorkletNode wrapped for auto-disconnect (fixes tremolo leak)');
+  }
 }
 
 /**

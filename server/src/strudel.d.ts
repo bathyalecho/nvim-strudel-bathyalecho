@@ -148,3 +148,9 @@ declare module '@strudel/soundfonts/gm.mjs' {
   const gm: Record<string, string[]>;
   export default gm;
 }
+
+declare module 'superdough/audioContext.mjs' {
+  export function getAudioContext(): AudioContext;
+  export function setAudioContext(ctx: AudioContext): void;
+  export const audioContext: AudioContext | null;
+}

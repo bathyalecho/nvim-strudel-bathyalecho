@@ -20,8 +20,8 @@ import { superdough, registerSynthSounds, registerZZFXSounds, aliasBank, samples
 // Import our custom soundfont loader (adapted for Node.js)
 import { registerSoundfonts, getSoundfontNames } from './soundfonts.js';
 
-// Import the worklet loader
-import { loadNodeWorklets } from './audio-polyfill.js';
+// Import the worklet loader and cleanup function
+import { loadNodeWorklets, cancelScheduledDisconnects } from './audio-polyfill.js';
 
 // Track different types of sounds separately
 const synthSounds: Set<string> = new Set();      // Synth waveforms (sine, saw, etc.)
@@ -747,6 +747,8 @@ export class StrudelEngine {
     if (!this.repl) return;
     this.repl.stop();
     this.cycle = 0;
+    // Cancel scheduled worklet disconnects (cleanup any lingering worklets)
+    cancelScheduledDisconnects();
   }
 
   /**
@@ -757,6 +759,9 @@ export class StrudelEngine {
     if (!this.repl) return;
     this.repl.stop();
     this.cycle = 0;
+    
+    // Cancel scheduled worklet disconnects and disconnect immediately
+    cancelScheduledDisconnects();
     
     // Clear any pending audio by suspending and resuming the audio context
     const ctx = getAudioContext();

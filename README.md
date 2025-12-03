@@ -29,7 +29,8 @@ nvim-strudel brings the Strudel live coding music environment to Neovim, providi
   ft = 'strudel',
   build = 'cd server && npm install && npm run build',
   keys = {
-    { '<C-CR>', '<cmd>StrudelPlay<cr>', ft = 'strudel', desc = 'Strudel: Play' },
+    { '<C-CR>', '<cmd>StrudelEval<cr>', ft = 'strudel', desc = 'Strudel: Eval' },
+    { '<leader>ss', '<cmd>StrudelStop<cr>', ft = 'strudel', desc = 'Strudel: Stop' },
   },
 }
 ```
@@ -52,6 +53,14 @@ require('strudel').setup({
     host = '127.0.0.1',
     port = 37812,
     auto_start = true,  -- Start server automatically on :StrudelConnect
+  },
+
+  -- Audio output backend
+  audio = {
+    output = 'webaudio',      -- 'webaudio' (default) or 'osc' (SuperDirt)
+    osc_host = '127.0.0.1',   -- SuperDirt OSC host
+    osc_port = 57120,         -- SuperDirt OSC port  
+    auto_superdirt = true,    -- Auto-start SuperDirt if sclang available
   },
 
   -- Visualization highlights
@@ -121,6 +130,10 @@ The pianoroll provides a visual representation of your pattern. It automatically
 
 ## Keymaps
 
+No keymaps are set by default. For live coding, you'll want at minimum:
+- **Eval** (`<C-CR>` or `<S-CR>`) - Evaluate and play pattern (the core live coding action)
+- **Stop** (`<leader>ss`) - Stop playback
+
 Define keymaps using lazy.nvim's `keys` spec:
 
 ```lua
@@ -129,11 +142,12 @@ Define keymaps using lazy.nvim's `keys` spec:
   ft = 'strudel',
   build = 'cd server && npm install && npm run build',
   keys = {
-    { '<C-CR>', '<cmd>StrudelPlay<cr>', ft = 'strudel', desc = 'Strudel: Play' },
-    { '<leader>sp', '<cmd>StrudelPlay<cr>', ft = 'strudel', desc = 'Strudel: Play' },
+    { '<C-CR>', '<cmd>StrudelEval<cr>', ft = 'strudel', desc = 'Strudel: Eval' },
     { '<leader>ss', '<cmd>StrudelStop<cr>', ft = 'strudel', desc = 'Strudel: Stop' },
-    { '<leader>sx', '<cmd>StrudelPause<cr>', ft = 'strudel', desc = 'Strudel: Pause' },
-    { '<leader>sh', '<cmd>StrudelHush<cr>', ft = 'strudel', desc = 'Strudel: Hush' },
+    { '<leader>sp', '<cmd>StrudelPianoroll<cr>', ft = 'strudel', desc = 'Strudel: Pianoroll' },
+    -- Optional extras:
+    -- { '<leader>sx', '<cmd>StrudelPause<cr>', ft = 'strudel', desc = 'Strudel: Pause' },
+    -- { '<leader>sh', '<cmd>StrudelHush<cr>', ft = 'strudel', desc = 'Strudel: Hush' },
   },
 }
 ```
@@ -160,18 +174,99 @@ require('strudel').setup({
 })
 ```
 
+## Audio Backends
+
+nvim-strudel supports two audio backends:
+
+### Web Audio (Default)
+
+The default backend uses Node.js Web Audio API via `node-web-audio-api`. This works out of the box with no additional setup.
+
+**Pros**: Zero configuration, works immediately  
+**Cons**: Higher CPU usage, potential memory growth with heavy effects (tremolo, etc.)
+
+### OSC/SuperDirt Backend
+
+For better performance and professional audio quality, you can use SuperCollider with SuperDirt. This sends OSC messages to SuperDirt instead of synthesizing audio in Node.js.
+
+**Pros**: Lower CPU, better audio quality, access to SuperDirt effects  
+**Cons**: Requires SuperCollider installation
+
+#### Configuration
+
+Enable OSC output in your setup:
+
+```lua
+require('strudel').setup({
+  audio = {
+    output = 'osc',           -- Use SuperDirt instead of Web Audio
+    osc_host = '127.0.0.1',   -- SuperDirt host (default)
+    osc_port = 57120,         -- SuperDirt port (default)
+    auto_superdirt = true,    -- Auto-start SuperDirt (default)
+  },
+})
+```
+
+When `auto_superdirt = true` (the default), nvim-strudel will automatically:
+- Install the SuperDirt quark if not already installed
+- Start JACK on Linux if not already running
+- Launch SuperDirt with optimized settings
+
+#### Installing SuperCollider
+
+You only need to install SuperCollider and JACK. SuperDirt is installed automatically.
+
+> **Note:** Installing JACK with D-Bus support (`jack2-dbus` or `jackd2`) is highly recommended. D-Bus allows PulseAudio/PipeWire to automatically release the audio device when JACK starts and route audio through JACK, avoiding conflicts.
+
+**Arch Linux:**
+```bash
+sudo pacman -S jack2-dbus supercollider sc3-plugins
+```
+
+**Debian/Ubuntu:**
+```bash
+sudo apt install jackd2 supercollider sc3-plugins
+```
+
+**Fedora:**
+```bash
+sudo dnf install jack-audio-connection-kit-dbus supercollider supercollider-sc3-plugins
+```
+
+**macOS (Homebrew):**
+```bash
+brew install jack supercollider
+```
+
+#### Troubleshooting OSC
+
+**No sound from SuperDirt:**
+- Check `:StrudelStatus` to verify OSC is connected
+- Look for errors in the Neovim messages (`:messages`)
+- Verify JACK is running: `jack_lsp` should list ports
+
+**SuperDirt fails to start:**
+- Ensure SuperCollider is installed: `which sclang`
+- On Linux, ensure JACK can start: try `jackd -d alsa` manually
+- Check audio device permissions (user may need to be in `audio` group)
+
 ## Running the Server Manually
 
-The server auto-starts by default. To run manually:
+The server auto-starts by default when you use `:StrudelConnect` or `:StrudelPlay`. To run manually:
 
 ```bash
 cd server
-node dist/index.js
+node dist/index.js [options]
 ```
 
-Environment variables:
-- `STRUDEL_PORT` - Server port (default: 37812)
-- `STRUDEL_HOST` - Server host (default: 127.0.0.1)
+Command-line options:
+- `--port <port>` - TCP server port (default: 37812)
+- `--host <host>` - TCP server host (default: 127.0.0.1)
+- `--osc` - Enable OSC output to SuperDirt
+- `--osc-host <host>` - SuperDirt host (default: 127.0.0.1)
+- `--osc-port <port>` - SuperDirt port (default: 57120)
+- `--auto-superdirt` - Auto-start SuperDirt if sclang is available
+- `--no-auto-superdirt` - Don't auto-start SuperDirt
 
 ## Highlighting
 
