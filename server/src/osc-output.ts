@@ -176,14 +176,21 @@ function hapToOscArgs(hap: any, cps: number): any[] {
     const bankAlias = String(controls.bank);
     const sound = String(controls.s);
     
-    // Try to resolve drum machine alias (tr909 -> RolandTR909)
-    const fullBankName = resolveDrumMachineBankSync(bankAlias);
-    if (fullBankName) {
-      // Drum machine: use full name with underscore separator
-      controls.s = `${fullBankName}_${sound}`;
+    // Check if Strudel already prefixed the sound name with the bank
+    // (e.g., s="RolandTR909_bd" with bank="RolandTR909")
+    if (sound.startsWith(bankAlias + '_') || sound.startsWith(bankAlias)) {
+      // Sound already has bank prefix - don't double-prefix
+      // Just keep 's' as-is
     } else {
-      // Unknown bank - just concatenate (original behavior)
-      controls.s = bankAlias + sound;
+      // Try to resolve drum machine alias (tr909 -> RolandTR909)
+      const fullBankName = resolveDrumMachineBankSync(bankAlias);
+      if (fullBankName) {
+        // Drum machine: use full name with underscore separator
+        controls.s = `${fullBankName}_${sound}`;
+      } else {
+        // Unknown bank - just concatenate (original behavior)
+        controls.s = bankAlias + sound;
+      }
     }
     delete controls.bank; // Don't send bank to SuperDirt - we already applied it
   }
@@ -244,6 +251,12 @@ function hapToOscArgs(hap: any, cps: number): any[] {
     
     // speed is critical - without it SuperDirt passes invalid value and synth is silent
     if (controls.speed == null) controls.speed = 1;
+    
+    // Match superdough's soundfont gain compensation
+    // In superdough, samples use getParamADSR with max gain 1.0 (sampler.mjs:315)
+    // while soundfonts use max gain 0.3 (fontloader.mjs:163)
+    // This compensates for soundfont samples being normalized louder than Dirt-Samples
+    controls.gain = controls.gain * 0.3;
   }
 
   // Flatten to array of [key, value, key, value, ...]
