@@ -350,6 +350,8 @@ s.waitForBoot {
    * Also stops JACK if we started it
    */
   stop(): void {
+    console.log('[superdirt] stop() called, weStartedJack:', this.weStartedJack);
+    
     if (this.sclangProcess) {
       console.log('[superdirt] Stopping sclang...');
       
@@ -396,6 +398,8 @@ s.waitForBoot {
       console.log('[superdirt] Stopping JACK (we started it)...');
       stopJack();
       this.weStartedJack = false;
+    } else {
+      console.log('[superdirt] Not stopping JACK (we did not start it)');
     }
   }
 
@@ -543,32 +547,49 @@ export function startJack(device = 'hw:0'): { started: boolean; weStartedIt: boo
 /**
  * Stop JACK (Linux only)
  * Use jack_control if available, otherwise pkill jackd
+ * This is synchronous to ensure JACK is stopped before process exits
  */
 export function stopJack(): void {
   if (platform() !== 'linux') {
     return;
   }
 
-  if (!isJackRunning()) {
+  // Check if JACK is actually running before trying to stop
+  // Use jack_control status which is reliable
+  let jackRunning = false;
+  try {
+    const result = execSync('jack_control status 2>&1', { timeout: 5000 }).toString();
+    jackRunning = result.split('\n').some(line => line.trim() === 'started');
+  } catch {
+    // If we can't check status, assume it might be running
+    jackRunning = true;
+  }
+  
+  if (!jackRunning) {
+    console.log('[jack] JACK is not running, nothing to stop');
     return;
   }
 
   console.log('[jack] Stopping JACK...');
   
-  // Method 1: Try jack_control (DBus)
+  // Method 1: Try jack_control (DBus) - this is the proper way on modern systems
   try {
-    execSync('jack_control stop 2>&1', { timeout: 5000, stdio: 'ignore' });
-    console.log('[jack] JACK stopped via DBus');
-    return;
-  } catch {
-    // jack_control failed
+    execSync('jack_control stop 2>&1', { timeout: 10000, stdio: 'pipe' });
+    // Verify it stopped
+    const result = execSync('jack_control status 2>&1', { timeout: 5000 }).toString();
+    if (result.split('\n').some(line => line.trim() === 'stopped')) {
+      console.log('[jack] JACK stopped via DBus');
+      return;
+    }
+  } catch (err) {
+    // jack_control failed, try other methods
+    console.log('[jack] jack_control stop failed, trying other methods...');
   }
   
-  // Method 2: Kill jackd directly
+  // Method 2: Kill jackd directly (if running standalone, not via DBus)
   try {
-    execSync('pkill -x jackd 2>/dev/null || true', { stdio: 'ignore' });
-    execSync('pkill -x jackdbus 2>/dev/null || true', { stdio: 'ignore' });
-    console.log('[jack] JACK killed via pkill');
+    execSync('pkill -x jackd 2>/dev/null || true', { stdio: 'ignore', timeout: 5000 });
+    console.log('[jack] Sent kill signal to jackd');
   } catch {
     // Ignore errors
   }

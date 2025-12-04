@@ -316,14 +316,19 @@ async function main() {
     }
     
     // Stop SuperDirt if we started it (also stops JACK if we started it)
+    // This MUST complete before we exit, otherwise JACK is left running
     if (superDirtLauncher) {
       try {
+        console.log('[strudel-server] Stopping SuperDirt and JACK...');
         superDirtLauncher.stop();
+        // Give a moment for cleanup to complete
+        await new Promise(resolve => setTimeout(resolve, 500));
       } catch (e) {
-        // Ignore errors
+        console.error('[strudel-server] Error stopping SuperDirt:', e);
       }
     }
     
+    console.log('[strudel-server] Shutdown complete');
     process.exit(0);
   };
 
