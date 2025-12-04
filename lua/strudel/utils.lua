@@ -95,8 +95,9 @@ function M.start_server(cmd, on_start)
   local started = false
 
   M._server_job = vim.fn.jobstart(cmd, {
-    -- Don't detach - server should die when Neovim exits
-    detach = false,
+    -- Detach so Neovim doesn't wait for server on exit
+    -- Server will shutdown when TCP client disconnects
+    detach = true,
     on_stdout = function(_, data)
       for _, line in ipairs(data) do
         if line ~= '' then

@@ -82,16 +82,24 @@ function M.setup(opts)
   M._server_cmd = get_server_cmd
 
   -- Setup cleanup on Neovim exit
-  -- This ensures the server (and its child processes like SuperDirt) are killed
+  -- Just disconnect - the server will detect "all clients disconnected" and shutdown itself
+  -- This avoids blocking Neovim exit while waiting for JACK/SuperDirt cleanup
   local augroup = vim.api.nvim_create_augroup('StrudelCleanup', { clear = true })
   vim.api.nvim_create_autocmd('VimLeavePre', {
     group = augroup,
     callback = function()
+      local client = require('strudel.client')
       local utils = require('strudel.utils')
-      if utils._server_job then
-        utils.debug('Stopping server on Neovim exit')
-        utils.stop_server()
+      
+      -- Disconnect TCP client - this triggers server's "all clients disconnected" handler
+      if client.is_connected() then
+        utils.debug('Disconnecting client on Neovim exit')
+        client.disconnect()
       end
+      
+      -- Clear the job reference without killing - server will shutdown on its own
+      -- This prevents Neovim from waiting for the process
+      utils._server_job = nil
     end,
   })
 
