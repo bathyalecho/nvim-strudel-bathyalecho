@@ -133,6 +133,44 @@ async function main() {
   const server = new StrudelTcpServer(config);
   const engine = new StrudelEngine();
 
+  // Define shutdown function early so it can be used by message handlers
+  // IMPORTANT: Signal handlers must be synchronous because Node.js doesn't wait
+  // for async operations before exiting. We use synchronous cleanup here.
+  let isShuttingDown = false;
+  
+  const shutdownSync = (reason?: string) => {
+    if (isShuttingDown) return; // Prevent double shutdown
+    isShuttingDown = true;
+    
+    console.log(`[strudel-server] Shutting down${reason ? ` (${reason})` : ''}...`);
+    
+    // Stop SuperDirt FIRST (synchronously stops JACK if we started it)
+    // This MUST happen before process.exit() or JACK will be orphaned
+    if (superDirtLauncher) {
+      try {
+        console.log('[strudel-server] Stopping SuperDirt and JACK...');
+        superDirtLauncher.stop();
+      } catch (e) {
+        console.error('[strudel-server] Error stopping SuperDirt:', e);
+      }
+    }
+    
+    try {
+      engine.dispose();
+    } catch (e) {
+      // Ignore errors during disposal
+    }
+    
+    try {
+      server.stopSync();
+    } catch (e) {
+      // Ignore errors during stop
+    }
+    
+    console.log('[strudel-server] Shutdown complete');
+    process.exit(0);
+  };
+
   // When using OSC, disable Web Audio output
   if (useOsc) {
     engine.setWebAudioEnabled(false);
@@ -276,6 +314,11 @@ async function main() {
         }
         break;
       }
+
+      case 'shutdown':
+        console.log('[strudel-server] Received shutdown request from client');
+        shutdownSync('client request');
+        break;
     }
   });
 
@@ -295,44 +338,7 @@ async function main() {
     shutdownSync('all clients disconnected');
   });
 
-  // Handle graceful shutdown
-  // IMPORTANT: Signal handlers must be synchronous because Node.js doesn't wait
-  // for async operations before exiting. We use synchronous cleanup here.
-  let isShuttingDown = false;
-  
-  const shutdownSync = (signal?: string) => {
-    if (isShuttingDown) return; // Prevent double shutdown
-    isShuttingDown = true;
-    
-    console.log(`[strudel-server] Shutting down${signal ? ` (${signal})` : ''}...`);
-    
-    // Stop SuperDirt FIRST (synchronously stops JACK if we started it)
-    // This MUST happen before process.exit() or JACK will be orphaned
-    if (superDirtLauncher) {
-      try {
-        console.log('[strudel-server] Stopping SuperDirt and JACK...');
-        superDirtLauncher.stop();
-      } catch (e) {
-        console.error('[strudel-server] Error stopping SuperDirt:', e);
-      }
-    }
-    
-    try {
-      engine.dispose();
-    } catch (e) {
-      // Ignore errors during disposal
-    }
-    
-    try {
-      server.stopSync();
-    } catch (e) {
-      // Ignore errors during stop
-    }
-    
-    console.log('[strudel-server] Shutdown complete');
-    process.exit(0);
-  };
-
+  // Register signal handlers
   process.on('SIGINT', () => shutdownSync('SIGINT'));
   process.on('SIGTERM', () => shutdownSync('SIGTERM'));
   process.on('SIGHUP', () => shutdownSync('SIGHUP'));

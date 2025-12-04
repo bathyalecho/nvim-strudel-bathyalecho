@@ -233,6 +233,12 @@ function M.hush()
   return M.send({ type = 'hush' })
 end
 
+---Send shutdown command to server
+---@return boolean
+function M.shutdown()
+  return M.send({ type = 'shutdown' })
+end
+
 ---Request samples list from server
 ---@param callback fun(samples: string[])
 function M.get_samples(callback)
