@@ -10,13 +10,26 @@
  */
 
 import { execSync, spawn } from 'child_process';
-import { existsSync, mkdirSync, writeFileSync, createWriteStream, readdirSync } from 'fs';
+import { existsSync, mkdirSync, writeFileSync, createWriteStream, readdirSync, rmSync, readFileSync } from 'fs';
 import { join, basename, extname } from 'path';
 import { homedir } from 'os';
 import { pipeline } from 'stream/promises';
 
 // @ts-ignore - osc has no type definitions
 import osc from 'osc';
+
+// Cache metadata version - increment when format changes
+const CACHE_META_VERSION = 1;
+
+/**
+ * Metadata stored in _meta.json for each sample bank
+ * Used to validate cache integrity
+ */
+interface BankCacheMetadata {
+  version: number;
+  expectedFiles: string[];  // List of expected WAV filenames (just basenames)
+  createdAt: string;
+}
 
 const CACHE_DIR = join(homedir(), '.local', 'share', 'strudel-samples');
 const SUPERDIRT_PORT = 57120;
@@ -126,6 +139,66 @@ function convertToWav(inputPath: string, outputPath: string): void {
 }
 
 /**
+ * Validate a sample bank cache against its metadata
+ * Returns true if cache is valid, false if stale/corrupted
+ */
+function validateBankCache(bankDir: string): boolean {
+  const metaPath = join(bankDir, '_meta.json');
+  
+  // No metadata = legacy cache, consider invalid
+  if (!existsSync(metaPath)) {
+    return false;
+  }
+  
+  try {
+    const meta: BankCacheMetadata = JSON.parse(readFileSync(metaPath, 'utf-8'));
+    
+    // Version mismatch = invalid
+    if (meta.version !== CACHE_META_VERSION) {
+      console.log(`[sample-manager] Cache version mismatch (${meta.version} vs ${CACHE_META_VERSION})`);
+      return false;
+    }
+    
+    // Check that all expected files exist
+    for (const expectedFile of meta.expectedFiles) {
+      if (!existsSync(join(bankDir, expectedFile))) {
+        console.log(`[sample-manager] Missing expected file: ${expectedFile}`);
+        return false;
+      }
+    }
+    
+    return true;
+  } catch (err) {
+    console.error(`[sample-manager] Failed to read cache metadata:`, err);
+    return false;
+  }
+}
+
+/**
+ * Wipe a stale/corrupted bank cache directory
+ */
+function wipeBankCache(bankDir: string, bankName: string): void {
+  console.log(`[sample-manager] Wiping stale cache for '${bankName}'`);
+  try {
+    rmSync(bankDir, { recursive: true, force: true });
+  } catch (err) {
+    console.error(`[sample-manager] Failed to wipe cache for '${bankName}':`, err);
+  }
+}
+
+/**
+ * Save bank cache metadata after successful download
+ */
+function saveBankMetadata(bankDir: string, expectedFiles: string[]): void {
+  const meta: BankCacheMetadata = {
+    version: CACHE_META_VERSION,
+    expectedFiles,
+    createdAt: new Date().toISOString(),
+  };
+  writeFileSync(join(bankDir, '_meta.json'), JSON.stringify(meta, null, 2));
+}
+
+/**
  * Parse a Strudel sample source and download/cache the samples
  * Returns the local path where samples are stored
  * 
@@ -178,15 +251,18 @@ export async function loadSamples(
     
     const bankDir = join(CACHE_DIR, bankName);
     
-    // Check if bank already exists and has files
+    // Check if bank already exists and is valid
     if (existsSync(bankDir)) {
-      const existingFiles = readdirSync(bankDir).filter(f => 
-        NATIVE_FORMATS.includes(extname(f).toLowerCase())
-      );
-      if (existingFiles.length > 0) {
-        console.log(`[sample-manager] Bank '${bankName}' already cached (${existingFiles.length} files)`);
+      if (validateBankCache(bankDir)) {
+        const existingFiles = readdirSync(bankDir).filter(f => 
+          NATIVE_FORMATS.includes(extname(f).toLowerCase())
+        );
+        console.log(`[sample-manager] Bank '${bankName}' cache valid (${existingFiles.length} files)`);
         bankNames.push(bankName);
         continue;
+      } else {
+        // Cache is stale/corrupted, wipe and re-download
+        wipeBankCache(bankDir, bankName);
       }
     }
     
@@ -203,6 +279,9 @@ export async function loadSamples(
     }
     
     console.log(`[sample-manager] Downloading bank '${bankName}' (${sampleFiles.length} files)...`);
+    
+    // Track successfully downloaded files for metadata
+    const downloadedFiles: string[] = [];
     
     let fileIndex = 0;
     for (const file of sampleFiles) {
@@ -233,6 +312,7 @@ export async function loadSamples(
           console.warn(`[sample-manager] Unsupported format: ${file}`);
           continue;
         }
+        downloadedFiles.push(destFileName);
         fileIndex++;
       } catch (err) {
         console.error(`[sample-manager] Failed to process ${file}:`, err);
@@ -240,6 +320,8 @@ export async function loadSamples(
     }
     
     if (fileIndex > 0) {
+      // Save metadata for cache validation
+      saveBankMetadata(bankDir, downloadedFiles);
       console.log(`[sample-manager] Bank '${bankName}' ready (${fileIndex} files)`);
       bankNames.push(bankName);
     }
@@ -307,16 +389,14 @@ export function getCacheDir(): string {
 }
 
 /**
- * Check if a sample bank exists in the cache
+ * Check if a sample bank exists in the cache and is valid
  */
 export function isBankCached(bankName: string): boolean {
   const bankDir = join(CACHE_DIR, bankName);
   if (!existsSync(bankDir)) return false;
   
-  const files = readdirSync(bankDir).filter(f => 
-    NATIVE_FORMATS.includes(extname(f).toLowerCase())
-  );
-  return files.length > 0;
+  // Validate cache integrity
+  return validateBankCache(bankDir);
 }
 
 /**

@@ -9,7 +9,7 @@
  */
 
 import { execSync } from 'child_process';
-import { existsSync, mkdirSync, writeFileSync, readdirSync } from 'fs';
+import { existsSync, mkdirSync, writeFileSync, readdirSync, readFileSync, rmSync } from 'fs';
 import { join } from 'path';
 import { homedir } from 'os';
 
@@ -30,6 +30,57 @@ interface SoundfontZone {
   loopEnd?: number;
   coarseTune: number;
   fineTune: number;
+}
+
+interface ZoneMetadata {
+  index: number;
+  midi: number;
+  keyRangeLow: number;
+  keyRangeHigh: number;
+}
+
+/**
+ * Validate soundfont cache against _zones.json metadata
+ * Returns true if cache is valid, false if stale/corrupted
+ */
+function validateSoundfontCache(bankDir: string): boolean {
+  const zonesPath = join(bankDir, '_zones.json');
+  
+  // No zones.json = invalid cache
+  if (!existsSync(zonesPath)) {
+    return false;
+  }
+  
+  try {
+    const zones: ZoneMetadata[] = JSON.parse(readFileSync(zonesPath, 'utf-8'));
+    
+    // Check that all expected files exist based on zone indices
+    for (const zone of zones) {
+      const paddedIndex = String(zone.index).padStart(3, '0');
+      const expectedFile = `${paddedIndex}_note${zone.midi}.wav`;
+      if (!existsSync(join(bankDir, expectedFile))) {
+        console.log(`[soundfont-loader] Missing expected file: ${expectedFile}`);
+        return false;
+      }
+    }
+    
+    return true;
+  } catch (err) {
+    console.error(`[soundfont-loader] Failed to read zones metadata:`, err);
+    return false;
+  }
+}
+
+/**
+ * Wipe a stale/corrupted soundfont cache directory
+ */
+function wipeSoundfontCache(bankDir: string, instrumentName: string): void {
+  console.log(`[soundfont-loader] Wiping stale cache for '${instrumentName}'`);
+  try {
+    rmSync(bankDir, { recursive: true, force: true });
+  } catch (err) {
+    console.error(`[soundfont-loader] Failed to wipe cache for '${instrumentName}':`, err);
+  }
 }
 
 /**
@@ -153,12 +204,15 @@ export async function loadSoundfontForSuperDirt(
 ): Promise<boolean> {
   const bankDir = join(CACHE_DIR, instrumentName);
   
-  // Check if already cached
+  // Check if already cached and valid
   if (existsSync(bankDir)) {
-    const files = readdirSync(bankDir).filter(f => f.endsWith('.wav'));
-    if (files.length > 0) {
-      console.log(`[soundfont-loader] ${instrumentName} already cached (${files.length} files)`);
+    if (validateSoundfontCache(bankDir)) {
+      const files = readdirSync(bankDir).filter(f => f.endsWith('.wav'));
+      console.log(`[soundfont-loader] ${instrumentName} cache valid (${files.length} files)`);
       return true;
+    } else {
+      // Cache is stale/corrupted, wipe and re-download
+      wipeSoundfontCache(bankDir, instrumentName);
     }
   }
   
@@ -282,14 +336,14 @@ export async function loadAllSoundfontsForSuperDirt(): Promise<number> {
 }
 
 /**
- * Check if a soundfont is already cached
+ * Check if a soundfont is already cached and valid
  */
 export function isSoundfontCached(instrumentName: string): boolean {
   const bankDir = join(CACHE_DIR, instrumentName);
   if (!existsSync(bankDir)) return false;
   
-  const files = readdirSync(bankDir).filter(f => f.endsWith('.wav'));
-  return files.length > 0;
+  // Validate cache integrity
+  return validateSoundfontCache(bankDir);
 }
 
 /**
