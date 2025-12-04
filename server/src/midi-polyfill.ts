@@ -10,6 +10,9 @@
 // @ts-ignore - midi has no type definitions
 import midi from 'midi';
 
+// Track all MIDIAccess instances for cleanup
+const allMidiAccess: Set<NodeMIDIAccess> = new Set();
+
 /**
  * Polyfill for MIDIOutput (Web MIDI API)
  */
@@ -59,6 +62,16 @@ class NodeMIDIOutput {
 
   clear(): void {
     // No-op - node-midi doesn't have a clear method
+  }
+
+  /**
+   * Internal cleanup - close port and release RtMidi resources
+   */
+  _dispose(): void {
+    if ((this as any).connection === 'open') {
+      this.output.closePort();
+      (this as any).connection = 'closed';
+    }
   }
 }
 
@@ -126,6 +139,19 @@ class NodeMIDIInput {
     }
     return Promise.resolve(this);
   }
+
+  /**
+   * Internal cleanup - close port, remove listeners, and release RtMidi resources
+   */
+  _dispose(): void {
+    this._onmidimessage = null;
+    if ((this as any).connection === 'open') {
+      this.input.closePort();
+      (this as any).connection = 'closed';
+    }
+    // Remove all event listeners from the RtMidi input
+    this.input.removeAllListeners('message');
+  }
 }
 
 /**
@@ -165,6 +191,24 @@ class NodeMIDIAccess {
     if (this.outputs.size > 0) {
       console.log(`[midi-polyfill] Outputs: ${Array.from(this.outputs.values()).map(o => o.name).join(', ')}`);
     }
+    
+    // Track this instance for cleanup
+    allMidiAccess.add(this);
+  }
+
+  /**
+   * Internal cleanup - dispose all ports
+   */
+  _dispose(): void {
+    for (const input of this.inputs.values()) {
+      (input as any)._dispose();
+    }
+    for (const output of this.outputs.values()) {
+      (output as any)._dispose();
+    }
+    this.inputs.clear();
+    this.outputs.clear();
+    allMidiAccess.delete(this);
   }
 }
 
@@ -217,7 +261,13 @@ export function initMidiPolyfill(): void {
 
 /**
  * Clean up MIDI resources
+ * Call this when shutting down the server to release all RtMidi ports
  */
 export function closeMidi(): void {
-  // Future: track open ports and close them
+  console.log(`[midi-polyfill] Closing ${allMidiAccess.size} MIDI access instances...`);
+  for (const access of allMidiAccess) {
+    (access as any)._dispose();
+  }
+  allMidiAccess.clear();
+  console.log('[midi-polyfill] All MIDI ports closed');
 }

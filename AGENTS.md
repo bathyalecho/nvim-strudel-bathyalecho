@@ -214,6 +214,94 @@ interface StatusMessage {
 - `@strudel/webaudio` - Web Audio API synthesis
 - `@strudel/mini` - Mini notation parser
 - `@strudel/tonal` - Scales, chords, note names
+- `@strudel/midi` - MIDI output and input
+
+### MIDI Support
+
+nvim-strudel includes full MIDI support via a Web MIDI API polyfill using RtMidi (node-midi).
+
+#### MIDI Output
+
+Send note patterns to external MIDI synths:
+
+```javascript
+// Basic MIDI output (uses first available port)
+note("c4 e4 g4").midi()
+
+// Specify MIDI port by name (use SINGLE QUOTES for port name!)
+note("c4 e4 g4").midi('FLUID Synth')
+
+// Using midiport() method
+note("c4 e4 g4").midi().midiport('FLUID Synth')
+
+// MIDI channel
+note("c4 e4 g4").midi().midichan(2)
+
+// Program change
+note("c4").midi().progNum(5)
+
+// Control change
+ccn(1).ccv(64).midi()  // CC1 (mod wheel) = 64
+```
+
+**Important**: Port names must use **single quotes** in Strudel code. This is because Strudel's transpiler converts double-quoted strings into mini-notation patterns via `m()`, while single-quoted strings remain as literal strings.
+
+```javascript
+// CORRECT - single quotes for port name (literal string)
+note("c4").midi('My Synth')
+
+// WRONG - double quotes become mini-notation pattern
+note("c4").midi("My Synth")  // Error: "does not accept Pattern input"
+```
+
+#### MIDI Input
+
+Use `midin()` to receive CC (Control Change) messages for live parameter control:
+
+```javascript
+// Get CC controller from a MIDI input
+const cc1 = await midin('Midi Through')
+
+// Use CC values to control parameters
+s("bd sd").gain(cc1(1))  // CC1 controls gain
+s("hh*4").speed(cc1(74)) // CC74 controls speed
+```
+
+**Note**: `midin()` only receives **CC messages** for knob/fader control. Strudel is designed to be the sequencer, not a MIDI effects processor - it does not process incoming note events.
+
+#### Available MIDI Methods
+
+Pattern methods (on Pattern.prototype):
+- `.midi(portName?)` - Enable MIDI output, optionally specify port
+- `.midiport(name)` - Set MIDI output port
+- `.midichan(n)` - Set MIDI channel (1-16)
+- `.midicmd(cmd)` - Raw MIDI command
+- `.ccn(n)` - Control Change number
+- `.ccv(v)` - Control Change value
+- `.control(n, v)` - Combined CC (alias for ccn().ccv())
+- `.progNum(n)` - Program Change
+- `.midibend(v)` - Pitch bend
+- `.miditouch(v)` - Aftertouch
+- `.sysex(bytes)` - System Exclusive
+
+Standalone functions:
+- `midin(portName)` - Get MIDI input for CC control
+- `midimaps()` - List available MIDI maps
+- `defaultmidimap()` - Get default MIDI mapping
+
+#### Testing MIDI
+
+```bash
+# Start a software synth (e.g., fluidsynth)
+fluidsynth -s -a pulseaudio -m alsa_seq /usr/share/soundfonts/FluidR3_GM.sf2 &
+
+# List available MIDI ports
+aconnect -l
+
+# Test MIDI output
+cd server
+echo "note(\"c4 e4 g4\").midi('FLUID Synth')" | node test-pattern.mjs - 5
+```
 
 ### Pattern Evaluation
 Strudel patterns are functions of time. The engine:
@@ -448,11 +536,12 @@ This captures all OSC messages sent to port 57120 and displays their address and
 ## Future Enhancements
 
 - [ ] Multiple buffer support (layered patterns)
-- [ ] OSC output for external synths
+- [x] OSC output for external synths (SuperDirt)
+- [x] MIDI output for external synths
 - [ ] Recording/export functionality
 - [ ] Pattern history/undo visualization
 - [ ] Collaborative live coding (shared sessions)
-- [ ] Integration with SuperCollider/Tidal for advanced synthesis
+- [x] Integration with SuperCollider/Tidal for advanced synthesis
 
 ## References
 

@@ -25,7 +25,7 @@ import { loadNodeWorklets, cancelScheduledDisconnects } from './audio-polyfill.j
 
 // Initialize MIDI polyfill BEFORE importing @strudel/midi
 // This provides navigator.requestMIDIAccess using node-midi (RtMidi)
-import { initMidiPolyfill } from './midi-polyfill.js';
+import { initMidiPolyfill, closeMidi } from './midi-polyfill.js';
 initMidiPolyfill();
 
 // MIDI support - now safe to import since we've polyfilled Web MIDI API
@@ -1078,6 +1078,7 @@ export class StrudelEngine {
   dispose(): void {
     this.stop();
     this.disableOsc();
+    closeMidi(); // Clean up MIDI ports to prevent RtMidi port leak
     clearEngineState();
     console.log('[strudel-engine] Disposed');
   }
