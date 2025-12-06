@@ -10,7 +10,7 @@ export interface EvalMessage {
 }
 
 export interface ControlMessage {
-  type: 'play' | 'pause' | 'stop' | 'hush';
+  type: 'play' | 'pause' | 'stop' | 'hush' | 'shutdown';
 }
 
 export interface GetSamplesMessage {

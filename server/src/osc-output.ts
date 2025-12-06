@@ -280,7 +280,9 @@ function hapToOscArgs(hap: any, cps: number): any[] {
     if (controls.sfAttack == null) controls.sfAttack = controls.attack ?? 0.01;
     if (controls.sfRelease == null) controls.sfRelease = controls.release ?? 0.1;
     // sfSustain controls how long the note plays (use note duration from pattern)
-    if (controls.sfSustain == null) controls.sfSustain = controls.sustain ?? delta;
+    // Note: Strudel's 'sustain' param is the sustain LEVEL (0-1), not duration!
+    // We always use delta (note duration) for sfSustain
+    if (controls.sfSustain == null) controls.sfSustain = delta;
     
     // speed is critical - without it SuperDirt passes invalid value and synth is silent
     if (controls.speed == null) controls.speed = 1;
