@@ -281,14 +281,25 @@ function M.setup()
   })
   
   -- Stop when window is closed and no windows with evaluated buffers remain
+  -- AND no evaluated buffers exist anymore
   vim.api.nvim_create_autocmd('WinClosed', {
     group = wipeout_group,
     callback = function(args)
       -- Defer to let the window actually close first
       vim.schedule(function()
-        if not has_evaluated_buffer_window() and client.is_connected() then
+        -- Only stop if no evaluated buffers exist at all
+        -- (not just no windows showing them - buffer could still be loaded)
+        local has_any_evaluated = false
+        for bufnr, _ in pairs(evaluated_buffers) do
+          if vim.api.nvim_buf_is_valid(bufnr) then
+            has_any_evaluated = true
+            break
+          end
+        end
+        
+        if not has_any_evaluated and client.is_connected() then
           client.stop()
-          utils.debug('No strudel windows remain, stopping playback')
+          utils.debug('No evaluated buffers remain, stopping playback')
         end
       end)
     end,
