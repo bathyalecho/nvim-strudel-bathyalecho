@@ -329,28 +329,9 @@ local function setup_highlights()
     default = true,
     link = 'Comment',
   })
-  
-  -- Hidden cursor for pianoroll window (invisible)
-  vim.api.nvim_set_hl(0, 'StrudelPianoCursorHidden', {
-    default = true,
-    blend = 100,  -- Fully transparent
-  })
 end
 
----Fix cursor position in pianoroll window to prevent visual artifacts
----The cursor can appear to bounce around during rapid updates; fixing it
----to position 1,1 keeps it hidden in the border area
-local function fix_cursor_position()
-  if state.winid and vim.api.nvim_win_is_valid(state.winid) then
-    -- Only set cursor if this window has our buffer
-    local win_buf = vim.api.nvim_win_get_buf(state.winid)
-    if win_buf == state.bufnr then
-      pcall(vim.api.nvim_win_set_cursor, state.winid, { 1, 0 })
-    end
-  end
-end
-
----Update buffer content with minimal cursor flicker
+---Update buffer content
 ---@param lines string[]
 local function update_buffer_content(lines)
   if not state.bufnr or not vim.api.nvim_buf_is_valid(state.bufnr) then
@@ -360,7 +341,6 @@ local function update_buffer_content(lines)
   vim.api.nvim_set_option_value('modifiable', true, { buf = state.bufnr })
   vim.api.nvim_buf_set_lines(state.bufnr, 0, -1, false, lines)
   vim.api.nvim_set_option_value('modifiable', false, { buf = state.bufnr })
-  fix_cursor_position()
 end
 
 ---Get the current window width
@@ -596,9 +576,6 @@ render_braille = function(cycle, phase, width)
   end
   vim.api.nvim_buf_add_highlight(state.bufnr, state.ns_id, 'StrudelPianoBorder', 0, 0, -1)
   vim.api.nvim_buf_add_highlight(state.bufnr, state.ns_id, 'StrudelPianoBorder', #lines - 1, 0, -1)
-  
-  -- Final cursor fix after all updates
-  fix_cursor_position()
 end
 
 ---Render in drums braille mode (group 4 tracks per braille row)
@@ -740,9 +717,6 @@ render_drums = function(tracks, cycle, phase, width)
   end
   vim.api.nvim_buf_add_highlight(state.bufnr, state.ns_id, 'StrudelPianoBorder', 0, 0, -1)
   vim.api.nvim_buf_add_highlight(state.bufnr, state.ns_id, 'StrudelPianoBorder', #lines - 1, 0, -1)
-  
-  -- Final cursor fix after all updates
-  fix_cursor_position()
 end
 
 ---Render in track mode (original behavior)
@@ -853,9 +827,6 @@ render_tracks = function(tracks, cycle, phase, width)
   end
   vim.api.nvim_buf_add_highlight(state.bufnr, state.ns_id, 'StrudelPianoBorder', 0, 0, -1)
   vim.api.nvim_buf_add_highlight(state.bufnr, state.ns_id, 'StrudelPianoBorder', #lines - 1, 0, -1)
-  
-  -- Final cursor fix after all updates
-  fix_cursor_position()
 end
 
 ---Handle visualization data from server
@@ -990,12 +961,7 @@ show_window = function()
   vim.api.nvim_set_option_value('signcolumn', 'no', { win = state.winid })
   vim.api.nvim_set_option_value('winfixheight', true, { win = state.winid })
   vim.api.nvim_set_option_value('cursorline', false, { win = state.winid })
-  vim.api.nvim_set_option_value('cursorcolumn', false, { win = state.winid })
   vim.api.nvim_set_option_value('wrap', false, { win = state.winid })
-  
-  -- Hide cursor in pianoroll by using a blank cursor highlight
-  -- This prevents visual artifacts from cursor position during rapid updates
-  vim.api.nvim_set_option_value('winhighlight', 'Cursor:StrudelPianoCursorHidden,TermCursor:StrudelPianoCursorHidden', { win = state.winid })
 
   -- Return to original window
   vim.api.nvim_set_current_win(current_win)
