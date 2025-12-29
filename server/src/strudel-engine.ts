@@ -9,7 +9,7 @@ import type { ActiveElement, VisualizationEvent } from './types.js';
 import { initOsc, sendHapToSuperDirt, isOscConnected, closeOsc, setAudioContextStartTime } from './osc-output.js';
 import { writeEngineState, clearEngineState } from './engine-state.js';
 import { loadSamples as loadSamplesForSuperDirt, initSampleManager, notifySuperDirtLoadSamples, setupOscPort } from './sample-manager.js';
-import { loadSoundsForCode, ensureDrumMachineMetadataLoaded } from './on-demand-loader.js';
+import { loadSoundsForCode, ensureDrumMachineMetadataLoaded, resolveDrumMachineBankSync } from './on-demand-loader.js';
 import { registerBankMetadata } from './sample-metadata.js';
 
 // NOTE: Web Audio API polyfill is initialized in index.ts before this module is imported.
@@ -633,8 +633,21 @@ export class StrudelEngine {
           // Use the absolute time 't' directly - this is what strudel's webaudio.mjs does
           // The 't' parameter is the precise target time for this event
           // See: https://github.com/tidalcycles/strudel/pull/1004
+
+          // Check for unknown bank aliases and strip them to prevent invalid sound names
+          let value = hap.value;
+          if (value?.bank && value?.s) {
+            const fullBankName = resolveDrumMachineBankSync(String(value.bank));
+            if (!fullBankName) {
+              console.warn(`[strudel-engine] Unknown bank "${value.bank}" - valid banks include: TR808, TR909, Linn, DMX, etc. Using sound "${value.s}" without bank prefix.`);
+              // Strip the invalid bank to prevent superdough from creating "drum_bd" etc.
+              value = { ...value };
+              delete value.bank;
+            }
+          }
+
           // Fire and forget - don't await, let Web Audio handle the timing
-          superdough(hap.value, t, duration, cps, hap.whole?.begin?.valueOf()).catch((err) => {
+          superdough(value, t, duration, cps, hap.whole?.begin?.valueOf()).catch((err) => {
             // Only log errors for debugging, and do it asynchronously
             const sound = hap.value?.s || hap.value?.note || '?';
             console.warn(`[strudel-engine] Audio error for "${sound}": ${err instanceof Error ? err.message : err}`);
