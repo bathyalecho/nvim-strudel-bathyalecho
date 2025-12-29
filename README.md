@@ -11,6 +11,7 @@ nvim-strudel brings the Strudel live coding music environment to Neovim, providi
 - Full playback control (play, pause, stop, hush)
 - Pianoroll visualization (auto-shows when playing, hides when stopped)
 - LSP support for mini-notation (completions, hover, diagnostics)
+- **Music theory intelligence** - key detection, chord suggestions, scale browser
 - All default Strudel samples available (piano, drums, synths, etc.)
 
 ## Requirements
@@ -118,6 +119,17 @@ require('strudel').setup({
     mode = 'auto',  -- 'auto', 'tracks', 'notes', or 'drums'
   },
 
+  -- Music theory features
+  theory = {
+    enabled = true,              -- Enable music theory features
+    default_scope = 'line',      -- 'line', 'selection', or 'buffer'
+    show_degrees = true,         -- Show scale degrees in suggestions
+    show_functions = true,       -- Show harmonic functions (tonic, dominant, etc.)
+    include_secondary = true,    -- Include secondary dominants
+    include_substitutions = true, -- Include chord substitutions
+    include_borrowed = true,     -- Include borrowed chords
+  },
+
   -- Picker backend: 'auto', 'snacks', or 'telescope'
   picker = 'auto',
 
@@ -148,6 +160,10 @@ require('strudel').setup({
 | `:StrudelSounds` | Browse available sounds |
 | `:StrudelBanks` | Browse sample banks |
 | `:StrudelPatterns` | Browse saved patterns |
+| `:StrudelTheory [scope]` | Open chord suggestions popup (line/selection/buffer) |
+| `:StrudelAnalyze [scope]` | Detect key/scale from patterns |
+| `:StrudelScales [root]` | Browse and insert scales |
+| `:StrudelChords [root]` | Browse and insert chord types |
 
 ## Pianoroll
 
