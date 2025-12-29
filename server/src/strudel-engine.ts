@@ -581,10 +581,20 @@ export class StrudelEngine {
       defaultOutput: async (hap: any, deadline: number, duration: number, cps: number, t: number): Promise<void> => {
         // IMPORTANT: Don't await superdough - fire and forget for tight timing
         // The Web Audio API handles scheduling internally via absoluteTime
-        console.log(`[strudel-engine] defaultOutput called: s=${hap.value?.s} webAudio=${this.webAudioEnabled} osc=${this.oscEnabled} oscConnected=${isOscConnected()}`);
-        
+
+        // Determine the sound name to check if it's a synth
+        const soundName = hap.value?.s || '';
+        const isSynthSound = synthSounds.has(soundName);
+
+        // Routing logic:
+        // - Synth sounds (sine, sawtooth, etc.) -> Web Audio only (SuperDirt doesn't have these)
+        // - Sample sounds when OSC connected -> OSC only (avoid double-playing)
+        // - Sample sounds when OSC not connected -> Web Audio
+        const useWebAudioForThis = this.webAudioEnabled && (isSynthSound || !this.oscEnabled || !isOscConnected());
+        const useOscForThis = this.oscEnabled && isOscConnected() && !isSynthSound;
+
         // Play sound via superdough (Web Audio)
-        if (this.webAudioEnabled) {
+        if (useWebAudioForThis) {
           // Use the absolute time 't' directly - this is what strudel's webaudio.mjs does
           // The 't' parameter is the precise target time for this event
           // See: https://github.com/tidalcycles/strudel/pull/1004
@@ -595,13 +605,11 @@ export class StrudelEngine {
             console.warn(`[strudel-engine] Audio error for "${sound}": ${err instanceof Error ? err.message : err}`);
           });
         }
-        
-        // Also send to SuperDirt via OSC if enabled
+
+        // Send to SuperDirt via OSC for sample sounds
         // Pass 't' (target time in AudioContext seconds) for proper scheduling
-        if (this.oscEnabled && isOscConnected()) {
+        if (useOscForThis) {
           sendHapToSuperDirt(hap, t, cps);
-        } else if (this.oscEnabled) {
-          console.log('[strudel-engine] OSC enabled but not connected, skipping hap');
         }
         
         // Defer visualization work to avoid blocking audio scheduling
