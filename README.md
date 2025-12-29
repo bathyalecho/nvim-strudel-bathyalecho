@@ -18,6 +18,33 @@ nvim-strudel brings the Strudel live coding music environment to Neovim, providi
 - Neovim >= 0.9.0
 - Node.js >= 18.0
 - Audio output device
+- **SuperCollider** with **SuperDirt** (for audio synthesis)
+
+### Installing Audio Dependencies
+
+nvim-strudel uses OSC to send patterns to SuperDirt for audio synthesis. You need SuperCollider and JACK installed. SuperDirt is installed automatically on first run.
+
+**Arch Linux:**
+```bash
+sudo pacman -S jack2-dbus supercollider sc3-plugins
+```
+
+**Fedora/Nobara:**
+```bash
+sudo dnf install jack-audio-connection-kit-dbus supercollider supercollider-sc3-plugins
+```
+
+**Debian/Ubuntu:**
+```bash
+sudo apt install jackd2 supercollider sc3-plugins
+```
+
+**macOS (Homebrew):**
+```bash
+brew install jack supercollider
+```
+
+> **Note:** Installing JACK with D-Bus support (`jack2-dbus` or `jackd2`) is recommended. D-Bus allows PulseAudio/PipeWire to automatically release the audio device when JACK starts.
 
 ## Installation
 
@@ -60,9 +87,9 @@ require('strudel').setup({
 
   -- Audio output backend
   audio = {
-    output = 'webaudio',      -- 'webaudio' (default) or 'osc' (SuperDirt)
+    output = 'osc',           -- 'osc' (default, SuperDirt) or 'webaudio' (Node.js)
     osc_host = '127.0.0.1',   -- SuperDirt OSC host
-    osc_port = 57120,         -- SuperDirt OSC port  
+    osc_port = 57120,         -- SuperDirt OSC port
     auto_superdirt = true,    -- Auto-start SuperDirt if sclang available
   },
 
@@ -181,67 +208,36 @@ require('strudel').setup({
 
 nvim-strudel supports two audio backends:
 
-### Web Audio (Default)
+### OSC/SuperDirt (Default)
 
-The default backend uses Node.js Web Audio API via `node-web-audio-api`. This works out of the box with no additional setup.
+The default backend sends OSC messages to SuperDirt running in SuperCollider. This provides the best performance and audio quality.
 
-**Pros**: Zero configuration, works immediately  
-**Cons**: Higher CPU usage, potential memory growth with heavy effects (tremolo, etc.)
+**Pros**: Lower CPU usage, better audio quality, access to SuperDirt effects
+**Cons**: Requires SuperCollider installation (see [Requirements](#installing-audio-dependencies))
 
-### OSC/SuperDirt Backend
+When you run `:StrudelPlay`, nvim-strudel will automatically:
+- Start JACK on Linux if not already running
+- Launch SuperDirt with optimized settings
+- Install the SuperDirt quark if not already installed
 
-For better performance and professional audio quality, you can use SuperCollider with SuperDirt. This sends OSC messages to SuperDirt instead of synthesizing audio in Node.js.
+### Web Audio Backend
 
-**Pros**: Lower CPU, better audio quality, access to SuperDirt effects  
-**Cons**: Requires SuperCollider installation
+An alternative backend using Node.js Web Audio API via `node-web-audio-api`. This works without SuperCollider but has higher CPU usage.
 
-#### Configuration
+**Pros**: No external dependencies beyond Node.js
+**Cons**: Higher CPU usage, potential memory growth with heavy effects
 
-Enable OSC output in your setup:
+To use Web Audio instead of OSC:
 
 ```lua
 require('strudel').setup({
   audio = {
-    output = 'osc',           -- Use SuperDirt instead of Web Audio
-    osc_host = '127.0.0.1',   -- SuperDirt host (default)
-    osc_port = 57120,         -- SuperDirt port (default)
-    auto_superdirt = true,    -- Auto-start SuperDirt (default)
+    output = 'webaudio',
   },
 })
 ```
 
-When `auto_superdirt = true` (the default), nvim-strudel will automatically:
-- Install the SuperDirt quark if not already installed
-- Start JACK on Linux if not already running
-- Launch SuperDirt with optimized settings
-
-#### Installing SuperCollider
-
-You only need to install SuperCollider and JACK. SuperDirt is installed automatically.
-
-> **Note:** Installing JACK with D-Bus support (`jack2-dbus` or `jackd2`) is highly recommended. D-Bus allows PulseAudio/PipeWire to automatically release the audio device when JACK starts and route audio through JACK, avoiding conflicts.
-
-**Arch Linux:**
-```bash
-sudo pacman -S jack2-dbus supercollider sc3-plugins
-```
-
-**Debian/Ubuntu:**
-```bash
-sudo apt install jackd2 supercollider sc3-plugins
-```
-
-**Fedora:**
-```bash
-sudo dnf install jack-audio-connection-kit-dbus supercollider supercollider-sc3-plugins
-```
-
-**macOS (Homebrew):**
-```bash
-brew install jack supercollider
-```
-
-#### Troubleshooting OSC
+### Troubleshooting Audio
 
 **No sound from SuperDirt:**
 - Check `:StrudelStatus` to verify OSC is connected
