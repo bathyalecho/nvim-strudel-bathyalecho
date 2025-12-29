@@ -20,9 +20,54 @@ local state = {
 ---Register a callback for an event type
 ---@param event string
 ---@param callback function
+---@return function unsubscribe function to remove the callback
 function M.on(event, callback)
   state.callbacks[event] = state.callbacks[event] or {}
   table.insert(state.callbacks[event], callback)
+
+  -- Return unsubscribe function
+  return function()
+    M.off(event, callback)
+  end
+end
+
+---Unregister a callback for an event type
+---@param event string
+---@param callback function
+function M.off(event, callback)
+  local callbacks = state.callbacks[event]
+  if not callbacks then
+    return
+  end
+  for i = #callbacks, 1, -1 do
+    if callbacks[i] == callback then
+      table.remove(callbacks, i)
+      break
+    end
+  end
+end
+
+---Register a one-time callback that auto-removes after being called
+---@param event string
+---@param callback function
+---@return function unsubscribe function to remove the callback
+function M.once(event, callback)
+  local wrapper
+  wrapper = function(data)
+    M.off(event, wrapper)
+    callback(data)
+  end
+  return M.on(event, wrapper)
+end
+
+---Clear all callbacks for an event type, or all callbacks if no event specified
+---@param event? string
+function M.clear_callbacks(event)
+  if event then
+    state.callbacks[event] = {}
+  else
+    state.callbacks = {}
+  end
 end
 
 ---Emit an event to all registered callbacks
@@ -252,14 +297,10 @@ function M.get_samples(callback)
     return
   end
 
-  -- Register one-time callback for samples response
-  local function on_samples(msg)
+  -- Use once() so callback auto-removes after being called
+  M.once('samples', function(msg)
     callback(msg.samples or {})
-  end
-
-  -- Add callback, will be called when 'samples' message arrives
-  state.callbacks['samples'] = state.callbacks['samples'] or {}
-  table.insert(state.callbacks['samples'], on_samples)
+  end)
 
   -- Request samples
   M.send({ type = 'getSamples' })
@@ -273,12 +314,10 @@ function M.get_sounds(callback)
     return
   end
 
-  local function on_sounds(msg)
+  -- Use once() so callback auto-removes after being called
+  M.once('sounds', function(msg)
     callback(msg.sounds or {})
-  end
-
-  state.callbacks['sounds'] = state.callbacks['sounds'] or {}
-  table.insert(state.callbacks['sounds'], on_sounds)
+  end)
 
   M.send({ type = 'getSounds' })
 end
@@ -291,12 +330,10 @@ function M.get_banks(callback)
     return
   end
 
-  local function on_banks(msg)
+  -- Use once() so callback auto-removes after being called
+  M.once('banks', function(msg)
     callback(msg.banks or {})
-  end
-
-  state.callbacks['banks'] = state.callbacks['banks'] or {}
-  table.insert(state.callbacks['banks'], on_banks)
+  end)
 
   M.send({ type = 'getBanks' })
 end

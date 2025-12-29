@@ -42,6 +42,10 @@ const synthSounds: Set<string> = new Set();      // Synth waveforms (sine, saw, 
 const sampleBanks: Set<string> = new Set();      // Bank names for .bank() (RolandTR808, etc.)
 const loadedSamples: Set<string> = new Set();    // All sample/sound names for s()/sound()
 
+// Maximum active elements to prevent unbounded memory growth between broadcasts
+// At 50ms broadcast interval and typical patterns, 500 should be more than enough
+const MAX_ACTIVE_ELEMENTS = 500;
+
 // Flag to enable SuperDirt sample downloading (set by engine when OSC mode is active)
 let oscModeEnabled = false;
 let oscPortRef: any = null;
@@ -610,7 +614,17 @@ export class StrudelEngine {
           
           // Capture locations and process in next tick
           setImmediate(() => {
+            // Cap active elements to prevent unbounded memory growth
+            if (this.activeElements.length >= MAX_ACTIVE_ELEMENTS) {
+              return;
+            }
+
             for (let i = 0; i < locations.length; i++) {
+              // Stop if we hit the cap
+              if (this.activeElements.length >= MAX_ACTIVE_ELEMENTS) {
+                break;
+              }
+
               const loc = locations[i];
               if (typeof loc.start === 'number' && typeof loc.end === 'number') {
                 const startPos = fastOffsetToLineCol(loc.start);
