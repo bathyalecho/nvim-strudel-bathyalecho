@@ -18,7 +18,6 @@ nvim-strudel brings the Strudel live coding music environment to Neovim, providi
 
 - Neovim >= 0.9.0
 - Node.js >= 18.0
-- Python >= 3.x
 - Audio output device
 - **SuperCollider** with **SuperDirt** (for audio synthesis)
 
