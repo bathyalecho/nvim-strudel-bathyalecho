@@ -30,7 +30,7 @@ nvim-strudel uses OSC to send patterns to SuperDirt for audio synthesis. You nee
 sudo pacman -S jack2-dbus supercollider sc3-plugins
 ```
 
-**Fedora/Nobara:**
+**Fedora:**
 ```bash
 sudo dnf install jack-audio-connection-kit-dbus supercollider supercollider-sc3-plugins
 ```
