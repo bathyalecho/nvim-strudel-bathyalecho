@@ -11,6 +11,7 @@ nvim-strudel brings the Strudel live coding music environment to Neovim, providi
 - Full playback control (play, pause, stop, hush)
 - Pianoroll visualization (auto-shows when playing, hides when stopped)
 - LSP support for mini-notation (completions, hover, diagnostics)
+- **Music theory intelligence** - key detection, chord suggestions, scale browser
 - All default Strudel samples available (piano, drums, synths, etc.)
 
 ## Requirements
@@ -52,7 +53,7 @@ brew install jack supercollider
 
 ```lua
 {
-    'bathyalecho/nvim-strudel',
+    'bathyalecho/nvim-strudel', branch="music-theory-feature"
     ft = 'strudel',
     build = 'cd server && npm install && npm run build',
     keys = {
@@ -66,6 +67,26 @@ brew install jack supercollider
 ```
 
 The `build` step compiles the backend server when the plugin is installed or updated.
+
+### NixOS
+    
+On NixOS, the plugin requires build dependencies for native modules (MIDI support). Use `nix-shell` in the build command:
+    
+```lua
+        {
+        'bathyalecho/nvim-strudel',
+        branch = 'music-theory-feature',
+        ft = 'strudel',
+        build = 'nix-shell -p gnumake gcc pkg-config alsa-lib.dev --run "cd server && npm install && npm run build"',
+            keys = {
+                { '<C-CR>', '<cmd>StrudelEval<cr>', ft = 'strudel', desc = 'Strudel: Eval' },
+                { '<leader>ss', '<cmd>StrudelStop<cr>', ft = 'strudel', desc = 'Strudel: Stop' },
+                },
+             config = function()
+                require('strudel').setup()
+            end,
+        }
+ ```
 
 ## Quick Start
 
@@ -118,6 +139,17 @@ require('strudel').setup({
     mode = 'auto',  -- 'auto', 'tracks', 'notes', or 'drums'
   },
 
+  -- Music theory features
+  theory = {
+    enabled = true,              -- Enable music theory features
+    default_scope = 'line',      -- 'line', 'selection', or 'buffer'
+    show_degrees = true,         -- Show scale degrees in suggestions
+    show_functions = true,       -- Show harmonic functions (tonic, dominant, etc.)
+    include_secondary = true,    -- Include secondary dominants
+    include_substitutions = true, -- Include chord substitutions
+    include_borrowed = true,     -- Include borrowed chords
+  },
+
   -- Picker backend: 'auto', 'snacks', or 'telescope'
   picker = 'auto',
 
@@ -148,6 +180,10 @@ require('strudel').setup({
 | `:StrudelSounds` | Browse available sounds |
 | `:StrudelBanks` | Browse sample banks |
 | `:StrudelPatterns` | Browse saved patterns |
+| `:StrudelTheory [scope]` | Open chord suggestions popup (line/selection/buffer) |
+| `:StrudelAnalyze [scope]` | Detect key/scale from patterns |
+| `:StrudelScales [root]` | Browse and insert scales |
+| `:StrudelChords [root]` | Browse and insert chord types |
 
 ## Pianoroll
 
@@ -157,6 +193,71 @@ The pianoroll provides a visual representation of your pattern. It automatically
 - Stays visible when paused
 - Supports multiple visualization modes: `auto`, `tracks`, `notes`, `drums`
 - Pattern code using `.pianoroll()` or `.punchcard()` auto-enables visualization
+
+## Music Theory
+
+nvim-strudel includes music theory intelligence that analyzes your patterns and suggests compatible chords.
+
+### Key Detection
+
+Run `:StrudelAnalyze` to detect the key and scale from your patterns:
+
+```javascript
+note("c3 e3 g3 b3")  // Detected: C Major (85% confidence)
+n("0 2 4 5 7")       // Detected: C Major (based on scale degrees)
+chord("<Am7 Dm7 G7 Cmaj7>")  // Detected: C Major (from chord progression)
+```
+
+### Chord Suggestions
+
+Run `:StrudelTheory` to open a floating window with chord suggestions:
+
+```
+┌─ Chord Suggestions ─────────────────┐
+│ C Major (85%) [line]                │
+│─────────────────────────────────────│
+│ j/k:nav  c:chord  n:note  d:deg     │
+│                                     │
+│ ▶ Cmaj7    I (tonic)                │
+│   Dm7      ii (supertonic)          │
+│   Em7      iii (mediant)            │
+│   Fmaj7    IV (subdominant)         │
+│   G7       V (dominant)             │
+│   Am7      vi (submediant)          │
+│   Bm7b5    vii (leading tone)       │
+│   D7       V7/ii (secondary dom)    │
+└─────────────────────────────────────┘
+```
+
+**Floating window keybindings:**
+
+| Key | Action |
+|-----|--------|
+| `j/k` or arrows | Navigate suggestions |
+| `c` or `<CR>` | Insert as `chord("...")` |
+| `n` | Insert as `note("...")` |
+| `d` | Insert as `n("...")` (scale degrees) |
+| `s` | Cycle scope (line → selection → buffer) |
+| `q` or `<Esc>` | Close |
+
+### Scale and Chord Browsers
+
+Browse and insert scales or chords with a picker:
+
+```vim
+:StrudelScales       " Browse all scales (default root: C)
+:StrudelScales G     " Browse scales starting on G
+:StrudelChords       " Browse all chord types (default root: C)
+:StrudelChords F#    " Browse chords with F# root
+```
+
+### Suggested Keymaps
+
+```lua
+vim.keymap.set('n', '<leader>st', '<cmd>StrudelTheory<cr>', { desc = 'Chord suggestions' })
+vim.keymap.set('v', '<leader>st', '<cmd>StrudelTheory selection<cr>', { desc = 'Chord suggestions (selection)' })
+vim.keymap.set('n', '<leader>sa', '<cmd>StrudelAnalyze<cr>', { desc = 'Analyze key/scale' })
+```
 
 ## Keymaps
 
@@ -280,6 +381,9 @@ Active elements are highlighted as they play. By default, highlights link to sta
 | `StrudelConnected` | `DiagnosticOk` | Connected status |
 | `StrudelDisconnected` | `DiagnosticError` | Disconnected status |
 | `StrudelError` | `DiagnosticUnderlineError` | Error underline |
+| `StrudelTheoryHeader` | `Title` | Theory popup header |
+| `StrudelTheoryChord` | `Function` | Chord names in popup |
+| `StrudelTheorySelected` | `CursorLine` | Selected suggestion |
 
 To customize, override in your config (after colorscheme loads):
 
