@@ -60,8 +60,10 @@ const DEFAULT_SAMPLE_NAMES = [
   'bd', 'sd', 'hh', 'oh', 'cp', 'mt', 'ht', 'lt', 'rim', 'cb', 'cr', 'rd', 'sh', 'tb', 'perc', 'misc', 'fx',
   // Piano
   'piano',
-  // Synths
+  // Synths (superdough oscillators)
   'sine', 'saw', 'square', 'triangle', 'sawtooth', 'tri', 'white', 'pink', 'brown',
+  // ZZFX chip synths
+  'zzfx', 'z_sine', 'z_sawtooth', 'z_triangle', 'z_square', 'z_tan', 'z_noise',
   // Misc samples
   'casio', 'jazz', 'metal', 'east', 'space', 'wind', 'insect', 'crow', 'numbers', 'mridangam',
   // Instruments from VCSL
