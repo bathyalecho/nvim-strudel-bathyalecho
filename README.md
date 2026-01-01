@@ -24,27 +24,44 @@ nvim-strudel brings the Strudel live coding music environment to Neovim, providi
 
 The default Web Audio backend works without additional dependencies. For better performance and audio quality, you can optionally use the OSC backend with SuperCollider/SuperDirt.
 
+#### Requirements
+
+**SuperCollider** is required for the OSC backend:
+
 **Arch Linux:**
 ```bash
-sudo pacman -S jack2-dbus supercollider sc3-plugins
+sudo pacman -S supercollider sc3-plugins
 ```
 
 **Fedora:**
 ```bash
-sudo dnf install jack-audio-connection-kit-dbus supercollider supercollider-sc3-plugins
+sudo dnf install supercollider supercollider-sc3-plugins
 ```
 
 **Debian/Ubuntu:**
 ```bash
-sudo apt install jackd2 supercollider sc3-plugins
+sudo apt install supercollider sc3-plugins
 ```
 
 **macOS (Homebrew):**
 ```bash
-brew install jack supercollider
+brew install supercollider
 ```
 
-> **Note:** Installing JACK with D-Bus support (`jack2-dbus` or `jackd2`) is recommended. D-Bus allows PulseAudio/PipeWire to automatically release the audio device when JACK starts.
+#### JACK/Audio Server
+
+On Linux, SuperDirt requires a JACK-compatible audio server. Modern Linux systems typically use **PipeWire**, which provides a JACK-compatible interface automatically:
+
+- **PipeWire** (recommended): Most modern Linux distributions use PipeWire by default. It provides a JACK-compatible interface, so SuperDirt works out of the box without additional configuration.
+
+- **Traditional JACK**: If you're using a dedicated JACK server (jackd), install:
+  - Arch: `jack2-dbus` (provides jack_control for D-Bus integration)
+  - Debian/Ubuntu: `jackd2`
+  - Fedora: `jack-audio-connection-kit-dbus`
+
+**For PipeWire users**: No additional JACK installation is needed. SuperDirt will automatically detect PipeWire and connect to its JACK interface.
+
+**For traditional JACK users**: Installing JACK with D-Bus support allows PulseAudio to automatically release the audio device when JACK starts.
 
 ## Installation
 
@@ -299,6 +316,12 @@ An alternative backend that sends OSC messages to SuperDirt running in SuperColl
 **Pros**: Lower CPU usage, better audio quality, access to SuperDirt effects
 **Cons**: Requires SuperCollider installation (see [Installing SuperCollider](#optional-supercollidersuperdirt-for-osc-backend))
 
+**Audio Server Detection**: The OSC backend automatically detects your audio server:
+
+- **PipeWire**: On modern Linux, PipeWire provides a JACK-compatible interface. SuperDirt connects to PipeWire automatically.
+- **Traditional JACK**: If a dedicated JACK server is running, SuperDirt connects to it.
+- **No JACK**: If neither is detected, SuperDirt will attempt to start JACK (if available).
+
 To use OSC instead of Web Audio:
 
 ```lua
@@ -313,7 +336,7 @@ require('strudel').setup({
 ```
 
 When you run `:StrudelPlay` with OSC backend, nvim-strudel will automatically:
-- Start JACK on Linux if not already running
+- Detect PipeWire or JACK audio server
 - Launch SuperDirt with optimized settings
 - Install the SuperDirt quark if not already installed
 
@@ -322,12 +345,15 @@ When you run `:StrudelPlay` with OSC backend, nvim-strudel will automatically:
 **No sound from SuperDirt:**
 - Check `:StrudelStatus` to verify OSC is connected
 - Look for errors in the Neovim messages (`:messages`)
-- Verify JACK is running: `jack_lsp` should list ports
+- On JACK systems, verify JACK is running: `jack_lsp` should list ports
+- On PipeWire systems, verify PipeWire is running: `pw-cli info 0` should show PipeWire info
 
 **SuperDirt fails to start:**
 - Ensure SuperCollider is installed: `which sclang`
-- On Linux, ensure JACK can start: try `jackd -d alsa` manually
-- Check audio device permissions (user may need to be in `audio` group)
+- On Linux, check audio server status:
+  - PipeWire: `pw-cli info 0` or `systemctl --user status pipewire`
+  - JACK: `jack_control status` or `jack_lsp`
+- Check audio device permissions (user may need to be in `audio` or `realtime` group)
 
 ## Running the Server Manually
 
@@ -346,6 +372,8 @@ Command-line options:
 - `--osc-port <port>` - SuperDirt port (default: 57120)
 - `--auto-superdirt` - Auto-start SuperDirt if sclang is available
 - `--no-auto-superdirt` - Don't auto-start SuperDirt
+
+The server automatically detects PipeWire (preferred on modern Linux) or traditional JACK audio servers. No manual JACK configuration is typically needed.
 
 ## Highlighting
 

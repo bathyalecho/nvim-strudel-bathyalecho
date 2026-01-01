@@ -716,7 +716,11 @@ s.waitForBoot {
 
 /**
  * Check if JACK server is running and accepting connections (Linux only)
- * 
+ *
+ * With PipeWire, JACK is provided by PipeWire. We should:
+ * 1. First check if PipeWire is running (provides JACK interface)
+ * 2. Then check if traditional JACK server is running
+ *
  * IMPORTANT: The jackdbus daemon process may exist without the JACK server being started.
  * We need to check if the JACK server is actually running and accepting connections.
  */
@@ -724,7 +728,20 @@ export function isJackRunning(): boolean {
   if (platform() !== 'linux') {
     return true; // Assume OK on non-Linux
   }
-  
+
+  // Method 0: Check for PipeWire first (provides JACK interface on modern systems)
+  // PipeWire runs even without jackdbus and provides libjack compatibility
+  try {
+    // Check if pw-cli works - if it does, PipeWire is running and provides JACK
+    const pwInfo = execSync('pw-cli info 0 2>/dev/null', { stdio: 'pipe', timeout: 5000 }).toString();
+    if (pwInfo.includes('PipeWire') && pwInfo.includes('version')) {
+      console.log('[jack] PipeWire detected (provides JACK interface)');
+      return true;
+    }
+  } catch {
+    // pw-cli failed or PipeWire not running
+  }
+
   // Method 1: Try jack_lsp - this actually connects to the JACK server
   // If JACK isn't running or accepting connections, this will fail
   // This is the most reliable method but jack_lsp may not be installed
@@ -734,7 +751,7 @@ export function isJackRunning(): boolean {
   } catch {
     // jack_lsp failed or not installed
   }
-  
+
   // Method 2: Use jack_control status (DBus)
   // This reports the actual server state, not just if jackdbus daemon is running
   // Output format: "--- status\nstarted" or "--- status\nstopped"
@@ -751,7 +768,7 @@ export function isJackRunning(): boolean {
   } catch {
     // jack_control not available or failed
   }
-  
+
   // Method 3: Check if jackd process is running (not jackdbus)
   // jackdbus is just the DBus service daemon, it can run without JACK server started
   try {
@@ -762,7 +779,7 @@ export function isJackRunning(): boolean {
   } catch {
     // No jackd process found
   }
-  
+
   return false;
 }
 
@@ -770,6 +787,10 @@ export function isJackRunning(): boolean {
  * Start JACK with default settings (Linux only)
  * Prefers jack_control (DBus) if available, falls back to jackd
  * Returns { started: boolean, weStartedIt: boolean }
+ *
+ * IMPORTANT: On systems with PipeWire, we should NOT try to start a separate JACK server.
+ * PipeWire provides a JACK-compatible interface and applications should connect to it directly.
+ * We detect PipeWire via pw-cli and skip starting traditional JACK.
  */
 export function startJack(device = 'hw:0'): { started: boolean; weStartedIt: boolean } {
   if (platform() !== 'linux') {
@@ -779,6 +800,17 @@ export function startJack(device = 'hw:0'): { started: boolean; weStartedIt: boo
   if (isJackRunning()) {
     console.log('[jack] JACK is already running');
     return { started: true, weStartedIt: false };
+  }
+
+  // Check if PipeWire is running - if so, we can't start traditional JACK
+  // Applications should connect to PipeWire's JACK interface via libjack
+  try {
+    execSync('pw-cli info 0 2>/dev/null', { stdio: 'pipe', timeout: 5000 });
+    console.log('[jack] PipeWire is running - cannot start traditional JACK server');
+    console.log('[jack] Applications should use libjack to connect to PipeWire');
+    return { started: true, weStartedIt: false };
+  } catch {
+    // PipeWire not running, proceed to start traditional JACK
   }
 
   console.log('[jack] Attempting to start JACK...');
