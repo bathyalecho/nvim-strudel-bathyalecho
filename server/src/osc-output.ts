@@ -2,6 +2,7 @@
 import osc from 'osc';
 import { processValueForOsc, isBankSoundfont } from './sample-metadata.js';
 import { resolveDrumMachineBankSync } from './on-demand-loader.js';
+import { captureOscMessage, shouldCaptureOsc } from './file-writer.js';
 
 // Default SuperDirt ports
 const OSC_REMOTE_IP = '127.0.0.1';
@@ -519,13 +520,20 @@ export function sendHapToSuperDirt(hap: any, targetTime: number, cps: number): v
   if (oscDebug) {
     console.log(`[osc] sendHapToSuperDirt called, hap.value:`, JSON.stringify(hap.value));
   }
-  if (!udpPort || !isOpen) {
-    // Silently skip if OSC not connected
-    return;
-  }
-
+  
   try {
     const args = hapToOscArgs(hap, cps);
+    
+    // Capture OSC message for file output if recording is enabled
+    // This happens regardless of whether real-time OSC is connected
+    if (shouldCaptureOsc()) {
+      captureOscMessage(targetTime, '/dirt/play', args);
+    }
+    
+    // Skip real-time sending if OSC not connected
+    if (!udpPort || !isOpen) {
+      return;
+    }
     
     // Convert AudioContext time to Unix time for OSC timetag
     const unixTargetTime = audioTimeToUnixTime(targetTime);

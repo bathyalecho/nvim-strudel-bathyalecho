@@ -787,8 +787,10 @@ export class StrudelEngine {
 
   /**
    * Evaluate Strudel code and create a pattern
+   * @param code - The Strudel code to evaluate
+   * @param autostart - Whether to start playback immediately (default: true)
    */
-  async eval(code: string): Promise<{ success: boolean; error?: string }> {
+  async eval(code: string, autostart = true): Promise<{ success: boolean; error?: string }> {
     if (!this.repl) {
       return { success: false, error: 'REPL not initialized' };
     }
@@ -809,7 +811,7 @@ export class StrudelEngine {
         }
       }
       
-      await this.repl.evaluate(code, true);
+      await this.repl.evaluate(code, autostart);
       
       // Check if an error was captured via onEvalError callback
       if (this.lastEvalError) {
@@ -921,6 +923,21 @@ export class StrudelEngine {
       cycle: this.repl?.scheduler?.now?.() || this.cycle,
       cps: this.repl?.scheduler?.cps || this.cps,
     };
+  }
+
+  /**
+   * Get the current pattern (for offline rendering and direct querying)
+   * Returns the Pattern object or null if no pattern is loaded
+   */
+  getPattern(): Pattern | null {
+    return (this.repl as any)?.scheduler?.pattern || null;
+  }
+
+  /**
+   * Get cycles per second (tempo)
+   */
+  getCps(): number {
+    return this.repl?.scheduler?.cps || this.cps;
   }
 
   /**

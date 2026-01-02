@@ -22,6 +22,16 @@ import { initWorkletPolyfill } from './worklet-polyfill.js';
 // Store whether we've initialized
 let initialized = false;
 
+// Offline rendering configuration
+let offlineConfig: {
+  duration: number;
+  sampleRate: number;
+  channels: number;
+} | null = null;
+
+// Store the offline context for later access
+let offlineContext: InstanceType<typeof nodeWebAudio.OfflineAudioContext> | null = null;
+
 // Track scheduled worklet disconnects for cleanup on hush
 const scheduledDisconnects = new Map<any, NodeJS.Timeout>();
 
@@ -133,6 +143,44 @@ export function cancelScheduledDisconnects(): void {
 }
 
 /**
+ * Configure offline rendering mode.
+ * Call this BEFORE initAudioPolyfill() to enable offline rendering.
+ * When enabled, AudioContext will return an OfflineAudioContext instead.
+ * 
+ * @param duration - Duration in seconds to render
+ * @param sampleRate - Sample rate (default: 48000)
+ * @param channels - Number of channels (default: 2 for stereo)
+ */
+export function configureOfflineRendering(duration: number, sampleRate = 48000, channels = 2): void {
+  if (initialized) {
+    throw new Error('configureOfflineRendering must be called before initAudioPolyfill');
+  }
+  offlineConfig = { duration, sampleRate, channels };
+  console.log(`[audio-polyfill] Offline rendering configured: ${duration}s @ ${sampleRate}Hz, ${channels}ch`);
+}
+
+/**
+ * Get the offline audio context (only available after init in offline mode)
+ */
+export function getOfflineContext(): InstanceType<typeof nodeWebAudio.OfflineAudioContext> | null {
+  return offlineContext;
+}
+
+/**
+ * Render the offline context to an AudioBuffer.
+ * Call this after all audio has been scheduled.
+ */
+export async function renderOffline(): Promise<AudioBuffer> {
+  if (!offlineContext) {
+    throw new Error('Not in offline rendering mode');
+  }
+  console.log('[audio-polyfill] Starting offline render...');
+  const buffer = await offlineContext.startRendering();
+  console.log(`[audio-polyfill] Render complete: ${buffer.duration}s, ${buffer.numberOfChannels}ch`);
+  return buffer;
+}
+
+/**
  * Initialize the Web Audio API polyfill for Node.js
  * This adds AudioContext and related classes to globalThis,
  * and patches AudioContext.prototype with methods superdough expects.
@@ -144,22 +192,51 @@ export function initAudioPolyfill(): void {
   // Add all node-web-audio-api exports to globalThis
   Object.assign(globalThis, nodeWebAudio);
 
-  // Wrap AudioContext to use 'playback' latency hint by default on Linux
-  // This prevents audio glitches/underruns with ALSA backend
-  // See: https://github.com/niccolorosato/node-web-audio-api#audio-backend-and-latency
-  const OriginalAudioContext = (globalThis as any).AudioContext;
-  (globalThis as any).AudioContext = class AudioContextWrapper extends OriginalAudioContext {
-    constructor(options?: AudioContextOptions) {
-      // Default to 'playback' latency hint on Linux for stable audio
-      // Users can override with WEB_AUDIO_LATENCY env var or explicit option
-      const defaultOptions: AudioContextOptions = {
-        latencyHint: process.env.WEB_AUDIO_LATENCY as AudioContextLatencyCategory || 'playback',
-        ...options,
-      };
-      super(defaultOptions);
-      console.log(`[audio-polyfill] AudioContext created with latencyHint: ${defaultOptions.latencyHint}`);
-    }
-  };
+  // Check if we're in offline rendering mode
+  if (offlineConfig) {
+    // Create an OfflineAudioContext and return it whenever AudioContext is requested
+    const { duration, sampleRate, channels } = offlineConfig;
+    const length = Math.ceil(duration * sampleRate);
+    
+    offlineContext = new nodeWebAudio.OfflineAudioContext({
+      numberOfChannels: channels,
+      length,
+      sampleRate,
+    });
+    
+    console.log(`[audio-polyfill] Created OfflineAudioContext: ${duration}s, ${sampleRate}Hz, ${channels}ch`);
+    
+    // Replace AudioContext with a function that returns our singleton OfflineAudioContext
+    // Using a Proxy to make it work with both `new AudioContext()` and as a constructor
+    const offlineCtx = offlineContext;
+    (globalThis as any).AudioContext = new Proxy(function AudioContext() {}, {
+      construct(_target, _args) {
+        console.log('[audio-polyfill] AudioContext requested, returning OfflineAudioContext');
+        return offlineCtx as any;
+      },
+      apply(_target, _thisArg, _args) {
+        console.log('[audio-polyfill] AudioContext called, returning OfflineAudioContext');
+        return offlineCtx as any;
+      }
+    });
+  } else {
+    // Normal real-time mode: wrap AudioContext to use 'playback' latency hint by default on Linux
+    // This prevents audio glitches/underruns with ALSA backend
+    // See: https://github.com/niccolorosato/node-web-audio-api#audio-backend-and-latency
+    const OriginalAudioContext = (globalThis as any).AudioContext;
+    (globalThis as any).AudioContext = class AudioContextWrapper extends OriginalAudioContext {
+      constructor(options?: AudioContextOptions) {
+        // Default to 'playback' latency hint on Linux for stable audio
+        // Users can override with WEB_AUDIO_LATENCY env var or explicit option
+        const defaultOptions: AudioContextOptions = {
+          latencyHint: process.env.WEB_AUDIO_LATENCY as AudioContextLatencyCategory || 'playback',
+          ...options,
+        };
+        super(defaultOptions);
+        console.log(`[audio-polyfill] AudioContext created with latencyHint: ${defaultOptions.latencyHint}`);
+      }
+    };
+  }
 
   // Add a minimal `window` object for superdough code that expects it
   // (e.g., reverbGen.mjs assigns to window.filterNode, dspworklet.mjs adds event listener)
