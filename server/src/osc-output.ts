@@ -523,6 +523,31 @@ function hapToOscArgs(hap: any, cps: number): any[] {
     }
   }
   
+  // Pan compensation for SuperDirt's equal-power panning
+  // 
+  // SuperDirt always applies DirtPan using Pan2, which uses equal-power panning.
+  // At center (pan=0.5), Pan2 reduces each channel by sqrt(0.5) ≈ 0.707 (-3dB)
+  // to maintain constant power when summed.
+  //
+  // superdough/WebAudio only applies a StereoPannerNode when pan is explicitly set.
+  // When pan is not specified, no panner is added and the signal passes through unchanged.
+  //
+  // This means:
+  // - No pan specified: superdough = full level, SuperDirt = -3dB → we need to boost by sqrt(2)
+  // - Pan specified: both use equal-power panning → levels match
+  //
+  // The compensation factor is sqrt(2) ≈ 1.414 for the center position.
+  // For other pan positions, the compensation gradually decreases to 1.0 at hard left/right.
+  //
+  // NOTE: ZZFX synths are excluded from pan compensation because their gain staging
+  // is already calibrated differently (0.25 baked in vs 0.3 for regular synths).
+  // Empirically, ZZFX without pan compensation matches better.
+  const isZZFX = synthSoundMap[soundName]?.includes('zzfx');
+  if (rawValue.pan === undefined && !isZZFX) {
+    // No pan specified - SuperDirt will center with -3dB, compensate with sqrt(2)
+    controls.gain = controls.gain * Math.SQRT2;
+  }
+  
   // Convert gain to SuperDirt's gain curve (applies to all synth sounds)
   controls.gain = convertGainForSuperDirt(controls.gain);
 
