@@ -29,6 +29,8 @@ const DEFAULT_PATTERNS = [
   { name: 'saw', pattern: 'note("c4").s("saw").release(0.01)', duration: 2 },
   { name: 'square', pattern: 'note("c4").s("square").release(0.01)', duration: 2 },
   { name: 'triangle', pattern: 'note("c4").s("triangle").release(0.01)', duration: 2 },
+  { name: 'pulse', pattern: 'note("c4").s("pulse").release(0.1)', duration: 2 },
+  { name: 'supersaw', pattern: 'note("c3").s("supersaw").release(0.5)', duration: 2 },
   { name: 'white', pattern: 's("white").release(0.01)', duration: 2 },
   { name: 'pink', pattern: 's("pink").release(0.01)', duration: 2 },
   { name: 'brown', pattern: 's("brown").release(0.01)', duration: 2 },
@@ -59,9 +61,11 @@ async function renderWebAudio(pattern, outputPath, duration) {
   writeFileSync(patternFile, pattern);
   
   try {
+    // Use render-pattern-realtime.mjs instead of render-pattern.mjs
+    // because the offline renderer doesn't support AudioWorklet synths (pulse, supersaw)
     execSync(
-      `node render-pattern.mjs "${patternFile}" "${outputPath}" ${duration}`,
-      { cwd: __dirname, stdio: 'pipe', timeout: 60000 }
+      `node render-pattern-realtime.mjs "${patternFile}" "${outputPath}" ${duration}`,
+      { cwd: __dirname, stdio: 'pipe', timeout: duration * 1000 + 60000 }
     );
     return true;
   } catch (e) {
@@ -100,6 +104,12 @@ function parseComparisonOutput(output) {
   const rmsMatch = output.match(/RMS \(dB\)\s+(-?[\d.]+)\s+(-?[\d.]+)\s+([+-]?[\d.]+)/);
   const peakMatch = output.match(/Peak \(dB\)\s+(-?[\d.]+)\s+(-?[\d.]+)\s+([+-]?[\d.]+)/);
   const similarityMatch = output.match(/Similarity Score:\s+([\d.]+)/);
+  const spectralCorrMatch = output.match(/Spectral:\s+([-\d.]+)/);
+  const centroidMatch = output.match(/Centroid \(Hz\)\s+(\d+)\s+(\d+)\s+([+-]?\d+)/);
+  
+  // Extract dominant frequencies from detailed stats
+  const waFreqsMatch = output.match(/File 1 Dominant Frequencies:\s*([^\n]+)/);
+  const scFreqsMatch = output.match(/File 2 Dominant Frequencies:\s*([^\n]+)/);
   
   if (!rmsMatch && !peakMatch && !similarityMatch) {
     return null; // No valid data found
@@ -114,6 +124,12 @@ function parseComparisonOutput(output) {
     scPeak: peakMatch ? parseFloat(peakMatch[2]) : null,
     peakDiff: peakMatch ? parseFloat(peakMatch[3]) : null,
     similarity: similarityMatch ? parseFloat(similarityMatch[1]) : null,
+    spectralCorr: spectralCorrMatch ? parseFloat(spectralCorrMatch[1]) : null,
+    waCentroid: centroidMatch ? parseInt(centroidMatch[1]) : null,
+    scCentroid: centroidMatch ? parseInt(centroidMatch[2]) : null,
+    centroidDiff: centroidMatch ? parseInt(centroidMatch[3]) : null,
+    waFreqs: waFreqsMatch ? waFreqsMatch[1].trim() : null,
+    scFreqs: scFreqsMatch ? scFreqsMatch[1].trim() : null,
     fullOutput: output,
   };
 }
@@ -121,7 +137,8 @@ function parseComparisonOutput(output) {
 function compareAudio(waFile, scFile) {
   // Check if Python venv exists
   const pythonCmd = existsSync(PYTHON_VENV) ? PYTHON_VENV : 'python3';
-  const cmd = `"${pythonCmd}" "${COMPARE_SCRIPT}" "${waFile}" "${scFile}" --align --trim`;
+  // Always use --verbose to get spectral info (helps diagnose algorithm vs gain issues)
+  const cmd = `"${pythonCmd}" "${COMPARE_SCRIPT}" "${waFile}" "${scFile}" --align --trim --verbose`;
   
   try {
     const output = execSync(cmd, { 
@@ -188,6 +205,24 @@ async function testPattern(name, pattern, duration) {
     console.log(`    RMS:  WA=${result.waRms?.toFixed(1)}dB  SC=${result.scRms?.toFixed(1)}dB  Diff=${result.rmsDiff >= 0 ? '+' : ''}${result.rmsDiff?.toFixed(1)}dB`);
     console.log(`    Peak: WA=${result.waPeak?.toFixed(1)}dB  SC=${result.scPeak?.toFixed(1)}dB  Diff=${result.peakDiff >= 0 ? '+' : ''}${result.peakDiff?.toFixed(1)}dB`);
     console.log(`    Similarity: ${result.similarity?.toFixed(1)}/100`);
+    
+    // Show spectral info - helps diagnose algorithm vs gain issues
+    if (result.spectralCorr != null) {
+      const spectralQuality = result.spectralCorr > 0.95 ? 'Excellent' : 
+                              result.spectralCorr > 0.8 ? 'Good' : 
+                              result.spectralCorr > 0.5 ? 'Fair' : 'Poor';
+      console.log(`    Spectral correlation: ${result.spectralCorr.toFixed(3)} (${spectralQuality})`);
+    }
+    
+    // Show dominant frequencies if spectral correlation is poor (likely algorithm issue)
+    if (result.spectralCorr != null && result.spectralCorr < 0.8) {
+      console.log(`\n  ⚠ Low spectral correlation - possible algorithm mismatch!`);
+      if (result.waFreqs) console.log(`    WA dominant freqs: ${result.waFreqs}`);
+      if (result.scFreqs) console.log(`    SC dominant freqs: ${result.scFreqs}`);
+      if (result.centroidDiff != null && Math.abs(result.centroidDiff) > 200) {
+        console.log(`    Centroid diff: ${result.centroidDiff}Hz (timbre differs significantly)`);
+      }
+    }
   }
   
   return { name, ...result };
@@ -241,15 +276,18 @@ Examples:
   console.log('\n' + '═'.repeat(60));
   console.log('SUMMARY');
   console.log('═'.repeat(60));
-  console.log('\nPattern          RMS Diff    Peak Diff   Similarity');
-  console.log('-'.repeat(55));
+  console.log('\nPattern          RMS Diff    Peak Diff   Spectral  Similarity');
+  console.log('-'.repeat(62));
   
   for (const r of results) {
     if (r.success) {
       const rmsDiff = r.rmsDiff >= 0 ? `+${r.rmsDiff.toFixed(1)}` : r.rmsDiff.toFixed(1);
       const peakDiff = r.peakDiff >= 0 ? `+${r.peakDiff.toFixed(1)}` : r.peakDiff.toFixed(1);
+      const spectral = r.spectralCorr != null ? r.spectralCorr.toFixed(2) : 'N/A';
+      // Flag low spectral correlation with a warning
+      const spectralFlag = r.spectralCorr != null && r.spectralCorr < 0.8 ? '⚠' : ' ';
       console.log(
-        `${r.name.padEnd(16)} ${rmsDiff.padStart(8)}dB  ${peakDiff.padStart(8)}dB   ${r.similarity?.toFixed(1).padStart(5)}/100`
+        `${r.name.padEnd(16)} ${rmsDiff.padStart(8)}dB  ${peakDiff.padStart(8)}dB   ${spectral.padStart(5)}${spectralFlag}  ${r.similarity?.toFixed(1).padStart(5)}/100`
       );
     } else {
       console.log(`${r.name.padEnd(16)} FAILED: ${r.error}`);

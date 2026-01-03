@@ -13,6 +13,7 @@
 import * as path from 'path';
 import * as fs from 'fs';
 import { fileURLToPath } from 'url';
+import { isSharedContextMode } from './audio-polyfill.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -47,7 +48,12 @@ export function initWorkletPolyfill(): void {
   // Get the AudioWorklet class from a temporary context
   const tempCtx = new AudioContext();
   const AudioWorkletProto = Object.getPrototypeOf(tempCtx.audioWorklet);
-  tempCtx.close?.();
+  
+  // Don't close the context in capture/offline mode since all AudioContext() calls
+  // return proxies to the same shared context - closing it breaks everything
+  if (!isSharedContextMode()) {
+    tempCtx.close?.();
+  }
   
   // Store the original addModule
   const originalAddModule = AudioWorkletProto.addModule;

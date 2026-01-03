@@ -32,6 +32,30 @@ let offlineConfig: {
 // Store the offline context for later access
 let offlineContext: InstanceType<typeof nodeWebAudio.OfflineAudioContext> | null = null;
 
+// Real-time capture configuration
+let captureConfig: {
+  duration: number;
+  sampleRate: number;
+  channels: number;
+} | null = null;
+
+/**
+ * Check if we're in a mode that uses a shared/singleton AudioContext.
+ * Used by worklet-polyfill to avoid closing the shared context.
+ */
+export function isSharedContextMode(): boolean {
+  return offlineConfig !== null || captureConfig !== null;
+}
+
+// Capture state
+let captureContext: InstanceType<typeof nodeWebAudio.AudioContext> | null = null;
+let captureGain: GainNode | null = null;
+let captureProcessor: ScriptProcessorNode | null = null;
+let capturedLeft: number[] = [];
+let capturedRight: number[] = [];
+let captureTargetSamples = 0;
+let captureTotalSamples = 0;
+
 // Track scheduled worklet disconnects for cleanup on hush
 const scheduledDisconnects = new Map<any, NodeJS.Timeout>();
 
@@ -147,6 +171,9 @@ export function cancelScheduledDisconnects(): void {
  * Call this BEFORE initAudioPolyfill() to enable offline rendering.
  * When enabled, AudioContext will return an OfflineAudioContext instead.
  * 
+ * NOTE: Offline rendering does NOT support AudioWorklet-based synths (pulse, supersaw)
+ * due to a limitation in node-web-audio-api. Use configureCaptureMode() for those.
+ * 
  * @param duration - Duration in seconds to render
  * @param sampleRate - Sample rate (default: 48000)
  * @param channels - Number of channels (default: 2 for stereo)
@@ -157,6 +184,103 @@ export function configureOfflineRendering(duration: number, sampleRate = 48000, 
   }
   offlineConfig = { duration, sampleRate, channels };
   console.log(`[audio-polyfill] Offline rendering configured: ${duration}s @ ${sampleRate}Hz, ${channels}ch`);
+}
+
+/**
+ * Configure real-time capture mode.
+ * Call this BEFORE initAudioPolyfill() to enable real-time audio capture.
+ * 
+ * Unlike offline rendering, this plays audio in real-time and captures it.
+ * This mode supports ALL synths including AudioWorklet-based ones (pulse, supersaw).
+ * 
+ * @param duration - Duration in seconds to capture
+ * @param sampleRate - Sample rate (default: 48000)
+ * @param channels - Number of channels (default: 2 for stereo)
+ */
+export function configureCaptureMode(duration: number, sampleRate = 48000, channels = 2): void {
+  if (initialized) {
+    throw new Error('configureCaptureMode must be called before initAudioPolyfill');
+  }
+  captureConfig = { duration, sampleRate, channels };
+  captureTargetSamples = Math.ceil(duration * sampleRate);
+  console.log(`[audio-polyfill] Capture mode configured: ${duration}s @ ${sampleRate}Hz, ${channels}ch`);
+}
+
+/**
+ * Get capture progress (0-1)
+ */
+export function getCaptureProgress(): number {
+  if (!captureConfig) return 0;
+  return Math.min(1, captureTotalSamples / captureTargetSamples);
+}
+
+/**
+ * Reset capture buffers - call this right before playback starts
+ * to avoid capturing silence during initialization
+ */
+export function resetCapture(): void {
+  if (!captureConfig) return;
+  capturedLeft = [];
+  capturedRight = [];
+  captureTotalSamples = 0;
+  console.log('[audio-polyfill] Capture buffers reset');
+}
+
+/**
+ * Check if capture is complete
+ */
+export function isCaptureComplete(): boolean {
+  if (!captureConfig) return false;
+  return captureTotalSamples >= captureTargetSamples;
+}
+
+/**
+ * Get the captured audio as an AudioBuffer.
+ * Call this after capture is complete.
+ */
+export function getCapturedAudio(): AudioBuffer {
+  if (!captureContext || !captureConfig) {
+    throw new Error('Not in capture mode or capture not started');
+  }
+  if (!isCaptureComplete()) {
+    console.warn('[audio-polyfill] Capture not complete yet, returning partial buffer');
+  }
+  
+  const buffer = captureContext.createBuffer(
+    captureConfig.channels,
+    capturedLeft.length,
+    captureConfig.sampleRate
+  );
+  buffer.getChannelData(0).set(new Float32Array(capturedLeft));
+  if (captureConfig.channels > 1) {
+    buffer.getChannelData(1).set(new Float32Array(capturedRight));
+  }
+  
+  return buffer;
+}
+
+/**
+ * Wait for capture to complete
+ * @param progressCallback - Optional callback called periodically with progress (0-1)
+ */
+export async function waitForCapture(progressCallback?: (progress: number) => void): Promise<AudioBuffer> {
+  if (!captureConfig) {
+    throw new Error('Not in capture mode');
+  }
+  
+  await new Promise<void>(resolve => {
+    const checkInterval = setInterval(() => {
+      if (progressCallback) {
+        progressCallback(getCaptureProgress());
+      }
+      if (isCaptureComplete()) {
+        clearInterval(checkInterval);
+        resolve();
+      }
+    }, 100);
+  });
+  
+  return getCapturedAudio();
 }
 
 /**
@@ -219,6 +343,95 @@ export function initAudioPolyfill(): void {
         return offlineCtx as any;
       }
     });
+  } else if (captureConfig) {
+    // Real-time capture mode: Create a real AudioContext but proxy destination
+    // to capture audio through a ScriptProcessorNode
+    const { sampleRate } = captureConfig;
+    
+    // Create the real audio context
+    const realContext = new nodeWebAudio.AudioContext({ 
+      latencyHint: 'playback',
+      sampleRate,
+    });
+    captureContext = realContext as any;
+    
+    // Reset capture buffers
+    capturedLeft = [];
+    capturedRight = [];
+    captureTotalSamples = 0;
+    
+    // Create capture chain
+    const gain = realContext.createGain();
+    const processor = realContext.createScriptProcessor(4096, 2, 2);
+    captureGain = gain as any;
+    captureProcessor = processor as any;
+    
+    // Copy destination properties to our gain node so superdough can read them
+    // Use defineProperty for read-only properties
+    const realDest = realContext.destination;
+    Object.defineProperty(gain, 'maxChannelCount', { value: realDest.maxChannelCount, configurable: true });
+    try { (gain as any).channelCount = realDest.channelCount; } catch {}
+    try { (gain as any).channelCountMode = realDest.channelCountMode; } catch {}
+    try { (gain as any).channelInterpretation = realDest.channelInterpretation; } catch {}
+    
+    // Set up capture processor
+    processor.onaudioprocess = (e: any) => {
+      if (captureTotalSamples >= captureTargetSamples) return;
+      
+      const inputLeft = e.inputBuffer.getChannelData(0);
+      const inputRight = e.inputBuffer.getChannelData(1);
+      const outputLeft = e.outputBuffer.getChannelData(0);
+      const outputRight = e.outputBuffer.getChannelData(1);
+      
+      for (let i = 0; i < inputLeft.length && captureTotalSamples < captureTargetSamples; i++) {
+        capturedLeft.push(inputLeft[i]);
+        capturedRight.push(inputRight[i]);
+        // Pass through to output (so we can hear it)
+        outputLeft[i] = inputLeft[i];
+        outputRight[i] = inputRight[i];
+        captureTotalSamples++;
+      }
+    };
+    
+    // Connect capture chain
+    gain.connect(processor);
+    processor.connect(realContext.destination);
+    
+    console.log(`[audio-polyfill] Capture mode enabled: intercepting destination`);
+    
+    // Create a proxy AudioContext that returns our captureGain as destination
+    const createProxyContext = () => {
+      return new Proxy(realContext as object, {
+        get(target: any, prop: string) {
+          if (prop === 'destination') {
+            return gain;
+          }
+          const value = target[prop];
+          if (typeof value === 'function') {
+            return value.bind(target);
+          }
+          return value;
+        },
+        set(target: any, prop: string, value: any) {
+          target[prop] = value;
+          return true;
+        }
+      });
+    };
+    
+    // Replace AudioContext constructor
+    (globalThis as any).AudioContext = new Proxy(function AudioContext() {}, {
+      construct() {
+        console.log('[audio-polyfill] AudioContext requested, returning capture proxy');
+        return createProxyContext();
+      },
+      apply() {
+        return createProxyContext();
+      }
+    });
+    
+    console.log(`[audio-polyfill] Capture context created: ${realContext.sampleRate}Hz`);
+    
   } else {
     // Normal real-time mode: wrap AudioContext to use 'playback' latency hint by default on Linux
     // This prevents audio glitches/underruns with ALSA backend

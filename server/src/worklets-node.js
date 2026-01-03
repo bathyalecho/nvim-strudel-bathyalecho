@@ -588,6 +588,14 @@ class SuperSawOscillatorProcessor extends AudioWorkletProcessor {
     const freqspreadParam = params.freqspread;
     const panspreadParam = params.panspread;
 
+    // Zero the output buffer first.
+    // Browsers zero AudioWorklet output buffers between process() calls, but
+    // node-web-audio-api does not. This ensures we match browser behavior.
+    for (let i = 0; i < output[0].length; i++) {
+      output[0][i] = 0;
+      if (output[1]) output[1][i] = 0;
+    }
+
     for (let i = 0; i < output[0].length; i++) {
       const detune = detuneParam ? (detuneParam[i] ?? detuneParam[0] ?? 0) : 0;
       const voices = Math.floor(voicesParam ? (voicesParam[i] ?? voicesParam[0] ?? 5) : 5);
@@ -718,6 +726,9 @@ class PulseOscillatorProcessor extends AudioWorkletProcessor {
       this.Y1 = 0.5 * (out1 + this.Y1); // anti-hunting filter
 
       // Combination of both oscillators with envelope applied
+      // NOTE: 0.15 matches the browser superdough implementation exactly.
+      // SuperCollider's strudel_pulse SynthDef uses a different algorithm (Pulse.ar * 1.9)
+      // which is ~8.6dB louder. We match the browser behavior here.
       const sample = 0.15 * (out0 - out1) * this.envf;
       
       for (let o = 0; o < output.length; o++) {
