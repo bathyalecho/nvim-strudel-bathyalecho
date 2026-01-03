@@ -308,15 +308,23 @@ function hapToOscArgs(hap: any, cps: number): any[] {
   // Handle synth sounds (oscillators)
   // These use our custom strudel_* SynthDefs instead of sample playback
   const synthSoundMap: Record<string, string> = {
+    // Basic waveforms
     'sine': 'strudel_sine',
+    'sin': 'strudel_sine',      // alias
     'sawtooth': 'strudel_sawtooth',
     'saw': 'strudel_saw',
     'square': 'strudel_square',
+    'sqr': 'strudel_square',    // alias
     'triangle': 'strudel_triangle',
     'tri': 'strudel_tri',
+    // Noise types
     'white': 'strudel_white',
     'pink': 'strudel_pink',
     'brown': 'strudel_brown',
+    // Extended synths
+    'pulse': 'strudel_pulse',   // pulse wave with PWM
+    'supersaw': 'strudel_supersaw', // unison detuned saws
+    'sbd': 'strudel_sbd',       // synthesized bass drum
     // ZZFX chip sounds - all use strudel_zzfx with different zshape
     'zzfx': 'strudel_zzfx',
     'z_sine': 'strudel_zzfx',
@@ -366,10 +374,16 @@ function hapToOscArgs(hap: any, cps: number): any[] {
       }
       controls.freq = 440 * Math.pow(2, (midiNote - 69) / 12);
     } else if (controls.freq === undefined) {
-      // Default frequency: MIDI note 36 (C2 = 65.41 Hz)
-      // This matches superdough's synth.mjs default: note: o = 36
-      // All synths (including ZZFX) use the same default
-      controls.freq = 65.41;  // C2 - superdough default for all synths
+      // Default frequency depends on synth type
+      if (synthInstrument === 'strudel_sbd') {
+        // sbd uses MIDI note 29 (F1 ≈ 43.65 Hz) as default
+        // This matches superdough's getFrequencyFromValue(value, 29)
+        controls.freq = 43.65;  // F1 - superdough default for sbd
+      } else {
+        // Other synths use MIDI note 36 (C2 = 65.41 Hz)
+        // This matches superdough's synth.mjs default: note: o = 36
+        controls.freq = 65.41;  // C2 - superdough default for all synths
+      }
     }
     
     // Handle ZZFX-specific parameters
@@ -406,16 +420,54 @@ function hapToOscArgs(hap: any, cps: number): any[] {
       // that regular synths use. Just use the raw pattern gain.
       // (The 0.25 is roughly equivalent to the 0.3 in other synths)
       controls.gain = controls.gain ?? 0.8;
+    } else if (synthInstrument === 'strudel_pulse') {
+      // Pulse wave synth with PWM (pulse width modulation)
+      // Map superdough's pulse params to our SynthDef
+      // pw = pulse width (0-1, default 0.5 = square wave)
+      // pwrate = LFO rate for PWM modulation (Hz)
+      // pwsweep = PWM modulation depth (how much pw oscillates)
+      if (controls.pw !== undefined) controls.pw = controls.pw;
+      if (controls.pwrate !== undefined) controls.pwrate = controls.pwrate;
+      if (controls.pwsweep !== undefined) controls.pwsweep = controls.pwsweep;
+      
+      // Apply standard synth gain reduction
+      controls.gain = (controls.gain ?? 0.8) * 0.3;
+    } else if (synthInstrument === 'strudel_supersaw') {
+      // Supersaw synth - multiple detuned sawtooth oscillators
+      // Map superdough's supersaw params to our SynthDef
+      // unison = number of voices (1-16)
+      // spread = stereo spread of voices (-1 to 1)
+      // detune = detune amount in semitones
+      if (controls.unison !== undefined) controls.unison = controls.unison;
+      if (controls.spread !== undefined) controls.spread = controls.spread;
+      if (controls.detune !== undefined) controls.detune = controls.detune;
+      
+      // Apply standard synth gain reduction
+      controls.gain = (controls.gain ?? 0.8) * 0.3;
+    } else if (synthInstrument === 'strudel_sbd') {
+      // Synthesized bass drum
+      // sbd uses its own envelope (not strudelEnv*), so we skip ADSR handling below
+      // Parameters passed through to SynthDef:
+      // decay = amplitude decay time
+      // pdecay = pitch envelope decay time
+      // penv = pitch envelope depth in semitones (how high the pitch starts)
+      // clip = saturation amount (0 = soft tanh, higher = more distortion)
+      // These params are already in controls and will be passed through as-is
+      
+      // sbd does NOT apply the 0.3 gain reduction that regular oscillators use
+      // In superdough, sbd uses gainNode(1) for mixing, not gainNode(0.3)
+      controls.gain = controls.gain ?? 0.8;
     } else {
-      // For non-ZZFX synths (sine, saw, etc.)
+      // For other synths (sine, saw, square, triangle, noise variants)
       // Apply superdough's oscillator gain reduction (0.3) here instead of in SynthDef
       // This matches synth.mjs: const g = gainNode(0.3);
       // The gain will then go through convertGainForSuperDirt() for the gain^4 curve
       controls.gain = (controls.gain ?? 0.8) * 0.3;
     }
     
-    // Common envelope handling for ALL synths (including ZZFX)
-    {
+    // Common envelope handling for most synths (ZZFX, pulse, supersaw, basic oscillators)
+    // sbd has its own built-in envelope and doesn't use strudelEnv* params
+    if (synthInstrument !== 'strudel_sbd') {
       // Calculate ADSR values matching superdough's getADSRValues behavior
       // This ensures sustainLevel is set correctly based on which params are specified
       // IMPORTANT: Check rawValue.sustain BEFORE we overwrite controls.sustain with delta
@@ -446,6 +498,11 @@ function hapToOscArgs(hap: any, cps: number): any[] {
       delete controls.attack;
       delete controls.decay;
       delete controls.release;
+    } else {
+      // sbd uses its own decay param for amplitude envelope
+      // Just set sustain for SynthDef timing
+      controls.sustain = delta;
+      // Keep decay, pdecay, penv, clip - they're used by the sbd SynthDef
     }
     
     // Delete note since we've converted to freq

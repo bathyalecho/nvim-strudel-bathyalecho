@@ -552,6 +552,147 @@ s.waitForBoot {
     "*** Strudel ZZFX SynthDef loaded ***".postln;
     
     // ========================================
+    // Pulse Wave Synth with PWM (pulse width modulation)
+    // Matches superdough's pulse synth with pw, pwrate, pwsweep params
+    // Uses strudelEnv* params for ADSR envelope
+    // ========================================
+    
+    SynthDef(\\strudel_pulse, { |out, freq = 440, sustain = 1, pan = 0, speed = 1,
+                                cutoff = 20000, hcutoff = 20,
+                                strudelEnvAttack = 0.001, strudelEnvDecay = 0.001,
+                                strudelEnvSustainLevel = 1, strudelEnvRelease = 0.01,
+                                strudelEnvHold = 1,
+                                pw = 0.5, pwrate = 1, pwsweep = 0|
+      var sound, env, width;
+      
+      env = EnvGen.ar(
+        Env.new(
+          [0, 1, strudelEnvSustainLevel, strudelEnvSustainLevel, 0],
+          [strudelEnvAttack, strudelEnvDecay, strudelEnvHold, strudelEnvRelease],
+          \\lin
+        ),
+        doneAction: 2
+      );
+      
+      // Pulse width modulation: pw oscillates around the base pw value
+      // pwsweep controls depth, pwrate controls speed
+      width = pw + (SinOsc.kr(pwrate) * pwsweep);
+      width = width.clip(0.01, 0.99);  // Prevent aliasing at extremes
+      
+      sound = Pulse.ar(freq * speed, width) * 1.9 * env;  // RMS compensation
+      sound = Select.ar(cutoff < 20000, [sound, LPF.ar(sound, cutoff.clip(20, 20000))]);
+      sound = Select.ar(hcutoff > 20, [sound, HPF.ar(sound, hcutoff.clip(20, 20000))]);
+      Out.ar(out, DirtPan.ar(sound, ${channels}, pan));
+    }, [\\ir, \\ir, \\ir, \\kr, \\ir, \\kr, \\kr, \\ir, \\ir, \\ir, \\ir, \\ir, \\kr, \\kr, \\kr]).add;
+    "Added: strudel_pulse".postln;
+    
+    // ========================================
+    // Supersaw Synth - Multiple detuned sawtooth oscillators
+    // Matches superdough's supersaw with unison, spread, detune params
+    // Uses strudelEnv* params for ADSR envelope
+    // ========================================
+    
+    SynthDef(\\strudel_supersaw, { |out, freq = 440, sustain = 1, pan = 0, speed = 1,
+                                   cutoff = 20000, hcutoff = 20,
+                                   strudelEnvAttack = 0.001, strudelEnvDecay = 0.001,
+                                   strudelEnvSustainLevel = 1, strudelEnvRelease = 0.01,
+                                   strudelEnvHold = 1,
+                                   unison = 5, spread = 0.6, detune = 0.18|
+      var sound, env, voices, freqs, pans, gainAdjust;
+      
+      env = EnvGen.ar(
+        Env.new(
+          [0, 1, strudelEnvSustainLevel, strudelEnvSustainLevel, 0],
+          [strudelEnvAttack, strudelEnvDecay, strudelEnvHold, strudelEnvRelease],
+          \\lin
+        ),
+        doneAction: 2
+      );
+      
+      // Clamp unison to reasonable range (1-16 for performance)
+      voices = unison.clip(1, 16);
+      
+      // Generate detuned frequencies for each voice
+      // Spread them evenly from -detune to +detune semitones
+      freqs = Array.fill(16, { |i|
+        var detuneAmount = (i - (voices - 1) / 2) / (voices.max(2) - 1) * 2;
+        freq * speed * (2 ** (detuneAmount * detune / 12))
+      });
+      
+      // Pan spread: voices spread from -spread to +spread
+      pans = Array.fill(16, { |i|
+        var panPos = (i - (voices - 1) / 2) / (voices.max(2) - 1) * 2;
+        panPos * spread
+      });
+      
+      // Mix all voices with gain compensation
+      gainAdjust = 1 / voices.sqrt;
+      sound = Mix.fill(16, { |i|
+        var sig = Saw.ar(freqs[i]) * (i < voices);  // Mute unused voices
+        Pan2.ar(sig, pans[i])
+      }) * gainAdjust * 2.0 * env;  // 2.0 = RMS compensation for Saw
+      
+      sound = Select.ar(cutoff < 20000, [sound, LPF.ar(sound, cutoff.clip(20, 20000))]);
+      sound = Select.ar(hcutoff > 20, [sound, HPF.ar(sound, hcutoff.clip(20, 20000))]);
+      Out.ar(out, DirtPan.ar(sound, ${channels}, pan));
+    }, [\\ir, \\ir, \\ir, \\kr, \\ir, \\kr, \\kr, \\ir, \\ir, \\ir, \\ir, \\ir, \\ir, \\kr, \\kr]).add;
+    "Added: strudel_supersaw".postln;
+    
+    // ========================================
+    // Synthesized Bass Drum (sbd)
+    // Matches superdough's sbd synth with decay, pdecay, penv params
+    // Triangle oscillator + brown noise transient + pitch envelope
+    // ========================================
+    
+    SynthDef(\\strudel_sbd, { |out, freq = 55, sustain = 1, pan = 0, speed = 1,
+                              decay = 0.5, pdecay = 0.5, penv = 36, clip = 0|
+      var osc, noise, env, noiseEnv, pitchEnv, mix;
+      var attackhold = 0.02;
+      var noiselvl = 1.2;
+      var noisedecay = 0.025;
+      
+      // Pitch envelope: starts at penv semitones above freq, drops exponentially
+      pitchEnv = EnvGen.kr(
+        Env.new([penv * 100, 0.001], [pdecay], \\exp),
+        doneAction: 0
+      );
+      
+      // Triangle oscillator with pitch envelope
+      osc = LFTri.ar((freq * speed) * (2 ** (pitchEnv / 1200)));
+      
+      // Soft saturation (tanh waveshaper like superdough)
+      osc = (osc * 2).tanh;
+      
+      // Amplitude envelope for oscillator
+      env = EnvGen.kr(
+        Env.new([1, 1, 0.001], [attackhold, decay], \\exp),
+        doneAction: 0
+      );
+      
+      // Brown noise transient
+      noise = FOS.ar(WhiteNoise.ar, 0.0196, 0, 0.9804);
+      noiseEnv = EnvGen.kr(
+        Env.new([noiselvl, 0.001], [noisedecay], \\exp),
+        doneAction: 0
+      );
+      
+      // Mix oscillator and noise
+      mix = (osc * env) + (noise * noiseEnv);
+      
+      // Overall envelope with optional clip
+      mix = mix * EnvGen.kr(
+        Env.new([1, 1, 0], [decay.max(0.01), 0.01]),
+        doneAction: 2
+      );
+      
+      Out.ar(out, DirtPan.ar(mix, ${channels}, pan));
+    }, [\\ir, \\ir, \\ir, \\kr, \\ir, \\kr, \\kr, \\kr]).add;
+    "Added: strudel_sbd".postln;
+    
+    s.sync;  // Ensure new synths are registered
+    "*** Strudel pulse/supersaw/sbd SynthDefs loaded ***".postln;
+    
+    // ========================================
     // Strudel ADSR Envelope Module (for SAMPLES only)
     // Synths have built-in envelopes, but samples use SuperDirt's sample SynthDefs
     // This module applies ADSR envelope to samples when strudelEnv* params are present
