@@ -46,6 +46,9 @@ sudo apt install supercollider sc3-plugins
 **macOS (Homebrew):**
 ```bash
 brew install supercollider
+
+**Nixos:**
+Requires Special Setup [View](nvim-strudel-nixos-setup.md)
 ```
 
 #### JACK/Audio Server
